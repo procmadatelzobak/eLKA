@@ -1,0 +1,32 @@
+"""Příprava Gitea adaptéru."""
+
+from __future__ import annotations
+
+from typing import Dict, List
+
+from .base import BaseGitAdapter
+
+
+class GiteaAdapter(BaseGitAdapter):
+    """Základní kostra Gitea adaptéru."""
+
+    def get_pr_files(self, pr_id: int) -> List[Dict[str, str]]:  # pragma: no cover - zatím neimplementováno
+        # TODO: Implementovat pomocí Gitea API
+        pass
+
+    def get_file_content(self, file_path: str, branch: str) -> str:  # pragma: no cover - zatím neimplementováno
+        # TODO: Implementovat pomocí Gitea API
+        pass
+
+    def post_comment_on_pr(self, pr_id: int, comment: str) -> None:  # pragma: no cover - zatím neimplementováno
+        # TODO: Implementovat pomocí Gitea API
+        pass
+
+    def update_pr_branch(
+        self,
+        pr_id: int,
+        files_to_commit: Dict[str, str],
+        commit_message: str,
+    ) -> None:  # pragma: no cover - zatím neimplementováno
+        # TODO: Implementovat pomocí Gitea API
+        pass
