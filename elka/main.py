@@ -98,7 +98,7 @@ def main() -> Tuple[Config, BaseAIAdapter]:
 
     git_adapter = create_git_adapter(config)
     ai_adapter = create_ai_adapter(config)
-    orchestrator = Orchestrator(config, ai_adapter=ai_adapter)
+    orchestrator = Orchestrator(config, ai_adapter=ai_adapter, git_adapter=git_adapter)
 
     logger = logging.getLogger(__name__)
     logger.info("Inicializován Git adaptér: %s", git_adapter.__class__.__name__)
