@@ -7,8 +7,8 @@ import logging
 from dataclasses import dataclass
 from typing import Any, Dict, List, Tuple
 
-from elka.adapters.ai.base import BaseAIAdapter
-from elka.utils.config import Config
+from ..adapters.ai.base import BaseAIAdapter
+from ..utils.config import Config
 
 
 ValidationResult = Dict[str, Any]

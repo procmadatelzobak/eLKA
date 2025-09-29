@@ -5,13 +5,13 @@ import subprocess
 from pathlib import Path
 from typing import TYPE_CHECKING, Dict, List
 
-from elka.adapters.ai.base import BaseAIAdapter
-from elka.adapters.git.base import BaseGitAdapter
-from elka.core.archivist import ArchivistEngine
-from elka.core.validator import ValidatorEngine
+from ..adapters.ai.base import BaseAIAdapter
+from ..adapters.git.base import BaseGitAdapter
+from .archivist import ArchivistEngine
+from .validator import ValidatorEngine
 
 if TYPE_CHECKING:
-    from elka.utils.config import Config
+    from ..utils.config import Config
 
 
 class Orchestrator:
