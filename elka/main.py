@@ -5,7 +5,7 @@ from __future__ import annotations
 import argparse
 import logging
 from pathlib import Path
-from typing import Dict, Type
+from typing import Dict, Optional, Type
 
 from elka.adapters.ai.base import BaseAIAdapter
 from elka.adapters.ai.gemini import GeminiAdapter
@@ -16,6 +16,7 @@ from elka.adapters.git.github import GitHubAdapter
 from elka.core.generator import GeneratorEngine
 from elka.core.orchestrator import Orchestrator
 from elka.utils.config import Config
+from elka.utils.logger import setup_logger
 
 
 GIT_ADAPTERS: Dict[str, Type[BaseGitAdapter]] = {
@@ -64,23 +65,6 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
-def configure_logging(config: Config) -> None:
-    logging_config = config.logging
-    level_name = str(logging_config.get("level", "INFO")).upper()
-    level = getattr(logging, level_name, logging.INFO)
-
-    log_kwargs = {
-        "level": level,
-        "format": "%(asctime)s [%(levelname)s] %(name)s: %(message)s",
-    }
-
-    log_file = logging_config.get("file")
-    if log_file:
-        log_kwargs["filename"] = log_file
-
-    logging.basicConfig(**log_kwargs)
-
-
 def create_git_adapter(config: Config) -> BaseGitAdapter:
     platform = (config.git_platform or "").lower()
     adapter_cls = GIT_ADAPTERS.get(platform)
@@ -120,25 +104,46 @@ def create_ai_adapter(config: Config) -> BaseAIAdapter:
 
 
 def main() -> None:
-    args = parse_args()
-    config = Config(args.config)
-    configure_logging(config)
+    logger: Optional[logging.Logger] = None
 
-    git_adapter = create_git_adapter(config)
-    ai_adapter = create_ai_adapter(config)
+    try:
+        args = parse_args()
+        config = Config(args.config)
+        logger = setup_logger(config.logging or {})
+        logger.info("Načtena konfigurace z %s", args.config)
 
-    logger = logging.getLogger(__name__)
-    logger.info("Inicializován Git adaptér: %s", git_adapter.__class__.__name__)
-    logger.info("Inicializován AI adaptér: %s", ai_adapter.__class__.__name__)
+        git_adapter = create_git_adapter(config)
+        ai_adapter = create_ai_adapter(config)
 
-    if args.command == "process":
-        orchestrator = Orchestrator(config, ai_adapter=ai_adapter, git_adapter=git_adapter)
-        logger.info("Spuštěno pro PR ID: %s", args.pr_id)
-        orchestrator.process_pull_request(args.pr_id)
-    elif args.command == "generate":
-        generator = GeneratorEngine(ai_adapter=ai_adapter, git_adapter=git_adapter, config=config)
-        logger.info("Spuštěno autonomní generování pro %s příběh(ů)", args.num_stories)
-        generator.run_cycle(num_stories=max(1, args.num_stories))
+        logger.info("Inicializován Git adaptér: %s", git_adapter.__class__.__name__)
+        logger.info("Inicializován AI adaptér: %s", ai_adapter.__class__.__name__)
+
+        if args.command == "process":
+            logger.info("Spouštím orchestrátor pro PR #%s", args.pr_id)
+            orchestrator = Orchestrator(
+                config,
+                ai_adapter=ai_adapter,
+                git_adapter=git_adapter,
+            )
+            orchestrator.process_pull_request(args.pr_id)
+        elif args.command == "generate":
+            stories = max(1, args.num_stories)
+            logger.info("Spouštím generátor pro %s příběh(ů)", stories)
+            generator = GeneratorEngine(
+                ai_adapter=ai_adapter,
+                git_adapter=git_adapter,
+                config=config,
+            )
+            generator.run_cycle(num_stories=stories)
+        else:  # pragma: no cover - ochrana proti neznámému příkazu
+            raise ValueError(f"Neznámý příkaz: {args.command}")
+    except Exception:
+        fallback_logger = logger or logging.getLogger(__name__)
+        if not fallback_logger.handlers:
+            logging.basicConfig(level=logging.ERROR)
+            fallback_logger = logging.getLogger(__name__)
+        fallback_logger.exception("Neočekávaná chyba při běhu eLKA agenta")
+        raise SystemExit(1)
 
 
 if __name__ == "__main__":
