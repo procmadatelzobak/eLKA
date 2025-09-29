@@ -11,11 +11,11 @@ import time
 from pathlib import Path
 from typing import Dict, List, Tuple
 
-from elka.adapters.ai.base import BaseAIAdapter
-from elka.adapters.git.base import BaseGitAdapter
-from elka.core.archivist import ArchivistEngine
-from elka.core.validator import ValidatorEngine
-from elka.utils.config import Config
+from ..adapters.ai.base import BaseAIAdapter
+from ..adapters.git.base import BaseGitAdapter
+from .archivist import ArchivistEngine
+from .validator import ValidatorEngine
+from ..utils.config import Config
 
 
 class GeneratorEngine:

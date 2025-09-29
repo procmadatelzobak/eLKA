@@ -7,16 +7,16 @@ import logging
 from pathlib import Path
 from typing import Dict, Optional, Type
 
-from elka.adapters.ai.base import BaseAIAdapter
-from elka.adapters.ai.gemini import GeminiAdapter
-from elka.adapters.ai.ollama import OllamaAdapter
-from elka.adapters.git.base import BaseGitAdapter
-from elka.adapters.git.gitea import GiteaAdapter
-from elka.adapters.git.github import GitHubAdapter
-from elka.core.generator import GeneratorEngine
-from elka.core.orchestrator import Orchestrator
-from elka.utils.config import Config
-from elka.utils.logger import setup_logger
+from .adapters.ai.base import BaseAIAdapter
+from .adapters.ai.gemini import GeminiAdapter
+from .adapters.ai.ollama import OllamaAdapter
+from .adapters.git.base import BaseGitAdapter
+from .adapters.git.gitea import GiteaAdapter
+from .adapters.git.github import GitHubAdapter
+from .core.generator import GeneratorEngine
+from .core.orchestrator import Orchestrator
+from .utils.config import Config
+from .utils.logger import setup_logger
 
 
 GIT_ADAPTERS: Dict[str, Type[BaseGitAdapter]] = {
@@ -32,7 +32,7 @@ AI_ADAPTERS: Dict[str, Type[BaseAIAdapter]] = {
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Spuštění eLKA agenta")
-    default_config = Path(__file__).resolve().parent / "config.yml"
+    default_config = Path(__file__).resolve().parent.parent / "config.yml"
     parser.add_argument(
         "--config",
         type=Path,

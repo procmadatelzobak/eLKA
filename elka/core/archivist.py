@@ -9,8 +9,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Dict, Iterable, List, Optional
 
-from elka.adapters.ai.base import BaseAIAdapter
-from elka.utils.config import Config
+from ..adapters.ai.base import BaseAIAdapter
+from ..utils.config import Config
 
 
 logger = logging.getLogger(__name__)

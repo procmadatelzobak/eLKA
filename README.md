@@ -9,22 +9,23 @@ cd eLKA
 python -m venv venv
 source venv/bin/activate
 pip install -r requirements.txt
+pip install -e .
 ```
 
 ## Konfigurace
-1. Zkopírujte `config.example.yml` jako `config.yml` a upravte hodnoty podle vašeho univerza.
+1. Upravte `config.yml` v kořenovém adresáři projektu tak, aby odpovídal vašemu prostředí.
 2. Zkopírujte `.env.example` jako `.env` a doplňte potřebné API klíče a tokeny (například `GITHUB_API_TOKEN`, `GEMINI_API_KEY`).
 
 ## Použití
 ### Asistovaný režim (zpracování PR)
 Tento režim je vhodný pro CI/CD pipeline, například GitHub Actions.
 ```bash
-python main.py process --pr-id <ID_PULL_REQUESTU>
+elka process --pr-id <ID_PULL_REQUESTU>
 ```
 
 ### Autonomní režim (generování příběhů)
 ```bash
-python main.py generate --num-stories <POCET_PRIBEHU>
+elka generate --num-stories <POCET_PRIBEHU>
 ```
 
 ## Architektura
