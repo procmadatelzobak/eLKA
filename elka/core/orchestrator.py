@@ -28,6 +28,12 @@ class Orchestrator:
         self.git = git_adapter
         self.logger = logging.getLogger(__name__)
 
+        self.logger.debug(
+            "Inicializuji Orchestrator s %s a %s",
+            ai_adapter.__class__.__name__,
+            git_adapter.__class__.__name__,
+        )
+
         self.validator = ValidatorEngine(ai_adapter=ai_adapter, config=config)
         self.archivist = ArchivistEngine(ai_adapter=ai_adapter, config=config)
 
@@ -38,8 +44,10 @@ class Orchestrator:
     def process_pull_request(self, pr_id: int) -> None:
         """Process the pull request with the given identifier."""
         self.logger.info("Spouštím zpracování PR #%s", pr_id)
+        self.logger.debug("Načítám soubory z PR #%s", pr_id)
 
         pr_files = self.git.get_pr_files(pr_id)
+        self.logger.debug("PR #%s obsahuje %s soubor(ů)", pr_id, len(pr_files))
         new_files = [item for item in pr_files if item.get("status") == "added"]
 
         if len(new_files) != 1:
@@ -54,6 +62,7 @@ class Orchestrator:
 
         story_path = new_files[0]["filename"]
         story_full_path = self.repo_root / story_path
+        self.logger.info("Zpracovávám příběh ze souboru %s", story_path)
 
         try:
             story_content = story_full_path.read_text(encoding="utf-8")
@@ -67,6 +76,9 @@ class Orchestrator:
             return
 
         try:
+            self.logger.debug(
+                "Načítám soubory z větve %s pro kontext vesmíru", self.main_branch
+            )
             universe_files = self._load_universe_files(exclude_path=story_path)
         except RuntimeError as exc:
             message = (
@@ -77,13 +89,20 @@ class Orchestrator:
             self.logger.exception("Chyba při načítání kánonu z větve %s", self.main_branch)
             return
 
+        self.logger.info("Zahajuji validaci PR #%s", pr_id)
         validation_result = self.validator.validate(story_content, universe_files)
 
         if validation_result.get("passed", False):
             self.logger.info("PR #%s prošel všemi validačními kroky.", pr_id)
 
             try:
+                self.logger.info(
+                    "Provádím archivaci příběhu a generování databázových souborů."
+                )
                 archive_updates = self.archivist.archive(story_content, universe_files)
+                self.logger.debug(
+                    "Archivace vrátila %s soubor(ů) ke změně.", len(archive_updates)
+                )
             except Exception as exc:  # pragma: no cover - ochrana proti selhání AI
                 message = (
                     "Validace příběhu proběhla, ale během archivace došlo k chybě. "
@@ -103,6 +122,9 @@ class Orchestrator:
             )
 
             try:
+                self.logger.info(
+                    "Aktualizuji větev PR #%s s %s soubory.", pr_id, changed_count
+                )
                 self.git.update_pr_branch(pr_id, files_to_commit, commit_message)
             except Exception as exc:  # pragma: no cover - závislé na Git API
                 message = (
@@ -130,12 +152,18 @@ class Orchestrator:
             comment_parts.append(f"- {error}")
 
         self.git.post_comment_on_pr(pr_id, "\n".join(comment_parts))
-        self.logger.info("PR #%s neprošel validací. Počet chyb: %s", pr_id, len(errors))
+        if errors:
+            self.logger.info("PR #%s neprošel validací. Počet chyb: %s", pr_id, len(errors))
+        else:
+            self.logger.warning(
+                "Validace PR #%s selhala bez poskytnutých detailů.", pr_id
+            )
 
     # ------------------------------------------------------------------
     # Helpers
 
     def _load_universe_files(self, exclude_path: str | None = None) -> Dict[str, str]:
+        self.logger.debug("Vypisuji soubory z větve %s", self.main_branch)
         file_paths = self._list_branch_files(self.main_branch)
         universe_files: Dict[str, str] = {}
         for path in file_paths:
@@ -145,6 +173,7 @@ class Orchestrator:
                 universe_files[path] = self.git.get_file_content(path, self.main_branch)
             except Exception as exc:  # pragma: no cover - závislé na Git API
                 raise RuntimeError(f"Načtení souboru {path} z větve {self.main_branch} selhalo: {exc}") from exc
+        self.logger.debug("Načteno %s soubor(ů) pro validaci.", len(universe_files))
         return universe_files
 
     def _list_branch_files(self, branch: str) -> List[str]:
@@ -157,6 +186,7 @@ class Orchestrator:
                 cwd=self.repo_root,
             )
         except subprocess.CalledProcessError as exc:
+            self.logger.exception("Volání git ls-tree selhalo pro větev %s", branch)
             raise RuntimeError(f"git ls-tree selhalo: {exc}") from exc
 
         files = [line.strip() for line in result.stdout.splitlines() if line.strip()]
