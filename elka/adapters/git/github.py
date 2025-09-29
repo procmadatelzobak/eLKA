@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Dict, List
 
 from github import Github, InputGitTreeElement
+from github.GithubException import GithubException
 from github.Repository import Repository
 
 from .base import BaseGitAdapter
@@ -60,3 +61,56 @@ class GitHubAdapter(BaseGitAdapter):
         new_tree = head_repo.create_git_tree(tree_elements, base_tree=last_commit.tree)
         new_commit = head_repo.create_git_commit(commit_message, new_tree, [last_commit])
         branch_ref.edit(new_commit.sha)
+
+    def create_branch_and_commit(
+        self,
+        base_branch: str,
+        new_branch: str,
+        files_to_commit: Dict[str, str],
+        commit_message: str,
+    ) -> str:
+        if not files_to_commit:
+            raise ValueError("Není co commitovat – seznam souborů je prázdný.")
+
+        base_ref = self.repository.get_git_ref(f"heads/{base_branch}")
+        base_commit = self.repository.get_git_commit(base_ref.object.sha)
+
+        tree_elements = []
+        for path, content in files_to_commit.items():
+            element = InputGitTreeElement(
+                path=path,
+                mode="100644",
+                type="blob",
+                content=content,
+            )
+            tree_elements.append(element)
+
+        new_tree = self.repository.create_git_tree(tree_elements, base_tree=base_commit.tree)
+        new_commit = self.repository.create_git_commit(commit_message, new_tree, [base_commit])
+
+        ref_name = f"heads/{new_branch}"
+        try:
+            branch_ref = self.repository.get_git_ref(ref_name)
+            branch_ref.edit(new_commit.sha, force=True)
+        except GithubException as exc:
+            if exc.status == 404:
+                self.repository.create_git_ref(f"refs/{ref_name}", new_commit.sha)
+            else:
+                raise
+
+        return new_commit.sha
+
+    def create_pull_request(
+        self,
+        title: str,
+        body: str,
+        head_branch: str,
+        base_branch: str,
+    ) -> str:
+        pr = self.repository.create_pull(
+            title=title,
+            body=body,
+            head=head_branch,
+            base=base_branch,
+        )
+        return pr.html_url or str(pr.number)

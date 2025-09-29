@@ -33,3 +33,23 @@ class BaseGitAdapter(ABC):
         commit_message: str,
     ) -> None:
         """Přidá nový commit do větve Pull Requestu s novými/upravenými soubory."""
+
+    @abstractmethod
+    def create_branch_and_commit(
+        self,
+        base_branch: str,
+        new_branch: str,
+        files_to_commit: Dict[str, str],
+        commit_message: str,
+    ) -> str:
+        """Vytvoří novou větev z dané základní větve, přidá commit a vrátí jeho SHA."""
+
+    @abstractmethod
+    def create_pull_request(
+        self,
+        title: str,
+        body: str,
+        head_branch: str,
+        base_branch: str,
+    ) -> str:
+        """Vytvoří Pull Request a vrátí jeho URL nebo identifikátor."""
