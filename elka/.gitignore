@@ -1,0 +1,16 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Závislosti
+.venv/
+venv/
+env/
+
+# Soukromé proměnné
+.env
+
+# Logy
+*.log
