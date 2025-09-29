@@ -30,3 +30,23 @@ class GiteaAdapter(BaseGitAdapter):
     ) -> None:  # pragma: no cover - zatím neimplementováno
         # TODO: Implementovat pomocí Gitea API
         pass
+
+    def create_branch_and_commit(
+        self,
+        base_branch: str,
+        new_branch: str,
+        files_to_commit: Dict[str, str],
+        commit_message: str,
+    ) -> str:  # pragma: no cover - zatím neimplementováno
+        # TODO: Implementovat pomocí Gitea API
+        raise NotImplementedError
+
+    def create_pull_request(
+        self,
+        title: str,
+        body: str,
+        head_branch: str,
+        base_branch: str,
+    ) -> str:  # pragma: no cover - zatím neimplementováno
+        # TODO: Implementovat pomocí Gitea API
+        raise NotImplementedError
