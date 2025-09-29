@@ -1,3 +1,5 @@
 PyYAML
 python-dotenv
 PyGithub
+google-generativeai
+requests
