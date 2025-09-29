@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING, Dict, List
 
 from elka.adapters.ai.base import BaseAIAdapter
 from elka.adapters.git.base import BaseGitAdapter
+from elka.core.archivist import ArchivistEngine
 from elka.core.validator import ValidatorEngine
 
 if TYPE_CHECKING:
@@ -28,6 +29,7 @@ class Orchestrator:
         self.logger = logging.getLogger(__name__)
 
         self.validator = ValidatorEngine(ai_adapter=ai_adapter, config=config)
+        self.archivist = ArchivistEngine(ai_adapter=ai_adapter, config=config)
 
         core_config = config.core or {}
         self.main_branch = core_config.get("main_branch", "master")
@@ -79,6 +81,45 @@ class Orchestrator:
 
         if validation_result.get("passed", False):
             self.logger.info("PR #%s prošel všemi validačními kroky.", pr_id)
+
+            try:
+                archive_updates = self.archivist.archive(story_content, universe_files)
+            except Exception as exc:  # pragma: no cover - ochrana proti selhání AI
+                message = (
+                    "Validace příběhu proběhla, ale během archivace došlo k chybě. "
+                    f"Prosím kontaktuj administrátora. Detail: {exc}"
+                )
+                self.git.post_comment_on_pr(pr_id, message)
+                self.logger.exception("Archivace příběhu %s selhala.", story_path)
+                return
+
+            files_to_commit = dict(archive_updates)
+            files_to_commit[story_path] = story_content
+
+            story_title = self._extract_story_title(story_content)
+            changed_count = len(files_to_commit)
+            commit_message = (
+                f"eLKA: Integrován příběh '{story_title}' a aktualizováno {changed_count} souborů."
+            )
+
+            try:
+                self.git.update_pr_branch(pr_id, files_to_commit, commit_message)
+            except Exception as exc:  # pragma: no cover - závislé na Git API
+                message = (
+                    "Archivační krok selhal při zapisování do větve. "
+                    f"Technický detail: {exc}"
+                )
+                self.git.post_comment_on_pr(pr_id, message)
+                self.logger.exception("Aktualizace větve PR #%s selhala.", pr_id)
+                return
+
+            self.git.post_comment_on_pr(
+                pr_id,
+                (
+                    "Validace úspěšná. Databázové soubory byly vygenerovány a přidány do tohoto PR. "
+                    "Nyní je připraven k revizi komunitou."
+                ),
+            )
             return
 
         errors = validation_result.get("errors", [])
@@ -120,5 +161,15 @@ class Orchestrator:
 
         files = [line.strip() for line in result.stdout.splitlines() if line.strip()]
         return files
+
+    @staticmethod
+    def _extract_story_title(story_content: str) -> str:
+        for line in story_content.splitlines():
+            if ":" not in line:
+                continue
+            key, value = line.split(":", 1)
+            if key.strip().lower() == "nazev":
+                return value.strip() or "Neznámý příběh"
+        return "Neznámý příběh"
 
 
