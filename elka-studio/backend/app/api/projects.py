@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import os
 import shutil
 from pathlib import Path
@@ -18,6 +19,8 @@ from ..db.session import get_session
 from ..models.project import Project
 from ..services import GitManager
 from ..utils.security import encrypt, get_secret_key
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/projects", tags=["projects"])
 
@@ -92,6 +95,7 @@ def create_project(payload: ProjectCreateRequest, session: Session = Depends(get
     try:
         secret_key = get_secret_key()
     except RuntimeError as exc:
+        logger.exception("Failed to access the secret key while creating project '%s'", payload.name)
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(exc)) from exc
 
     encrypted_token = encrypt(payload.git_token, secret_key) if payload.git_token else None
@@ -112,12 +116,18 @@ def create_project(payload: ProjectCreateRequest, session: Session = Depends(get
         try:
             local_path = git_manager.clone_repo(payload.git_url, payload.name, payload.git_token)
         except FileExistsError as exc:
+            logger.error(
+                "Cannot create project '%s': target path '%s' already exists", payload.name, target_path
+            )
             session.rollback()
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail=str(exc),
             ) from exc
         except Exception as exc:  # pragma: no cover - network dependent
+            logger.exception(
+                "Failed to clone repository '%s' for project '%s'", payload.git_url, payload.name
+            )
             session.rollback()
             if target_path.exists():
                 shutil.rmtree(target_path, ignore_errors=True)
@@ -129,6 +139,9 @@ def create_project(payload: ProjectCreateRequest, session: Session = Depends(get
         try:
             repo = git.Repo(local_path)
         except Exception as exc:  # pragma: no cover - git inspection dependent
+            logger.exception(
+                "Failed to inspect cloned repository for project '%s' at '%s'", payload.name, local_path
+            )
             session.rollback()
             if Path(local_path).exists():
                 shutil.rmtree(Path(local_path), ignore_errors=True)
@@ -152,6 +165,11 @@ def create_project(payload: ProjectCreateRequest, session: Session = Depends(get
             try:
                 git_manager._initialize_empty_repo(Path(project.local_path), scaffold_path, payload.git_token)
             except Exception as exc:  # pragma: no cover - network/IO dependent
+                logger.exception(
+                    "Failed to scaffold initial universe for project '%s' in '%s'",
+                    payload.name,
+                    project.local_path,
+                )
                 session.rollback()
                 if Path(project.local_path).exists():
                     shutil.rmtree(Path(project.local_path), ignore_errors=True)

@@ -20,7 +20,7 @@ eLKA Studio is a full-stack application for building and managing fictional univ
 6. The UI is automatically available at [http://localhost:5173](http://localhost:5173).
 7. Při prvním spuštění otevřete v levém panelu stránku **Settings** (ikona ozubeného kola) a uložte svůj Gemini API Key.
    Klíč se bezpečně uloží pouze do vašeho prohlížeče (localStorage) a okamžitě se použije pro všechny požadavky frontendové aplikace.
-8. Vraťte se na stránku **Projects** a klikněte na tlačítko **Add/Import Project** – stejné rozhraní nyní podporuje inicializaci nového i napojení na existující lore vesmír. Formulář přijímá jak zkrácený tvar `uzivatel/projekt`, tak plnou Git URL; při chybě klonování se nyní zobrazí konkrétní hláška přímo z backendu.
+8. Vraťte se na stránku **Projects** a klikněte na tlačítko **Add/Import Project** – stejné rozhraní nyní podporuje inicializaci nového i napojení na existující lore vesmír. Formulář přijímá jak zkrácený tvar `uzivatel/projekt`, tak plnou Git URL; pokud se import nezdaří, dialog nyní zobrazí text chyby společně s HTTP statusem a kompletní traceback se objeví v konzoli backendu, takže problém snadno dohledáte přímo v příkazové řádce.
 
 ## API Notes
 - When creating projects programmatically, send `name`, `git_url`, and (optionally) `git_token` in the request body to `/projects`. The API normalises GitHub zkrácený zápis `owner/repo` na plnou URL a vrací lidsky čitelné chyby pro neplatné vstupy.
