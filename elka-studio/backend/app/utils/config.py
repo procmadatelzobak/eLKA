@@ -103,6 +103,19 @@ class Config:
         return str(ai_config.get("model", "heuristic-v1"))
 
     # ------------------------------------------------------------------
+    # Security helpers
+    # ------------------------------------------------------------------
+    @property
+    def secret_key(self) -> Optional[str]:
+        """Secret key used for symmetric encryption of stored credentials."""
+
+        security_config = self.data.get("security", {})
+        secret = security_config.get("secret_key")
+        if secret is None:
+            return None
+        return str(secret)
+
+    # ------------------------------------------------------------------
     # Story archival helpers
     # ------------------------------------------------------------------
     @property

@@ -3,6 +3,11 @@ server:
   host: "127.0.0.1"
   port: 8000
 
+# Application secrets
+security:
+  # Used for encrypting stored Git tokens. Replace with your own random string.
+  secret_key: "change-me"
+
 # Local storage paths
 storage:
   projects_dir: "~/.elka/projects"

@@ -4,10 +4,13 @@ from __future__ import annotations
 
 import base64
 import os
+from functools import lru_cache
 from hashlib import sha256
 
 from cryptography.fernet import Fernet
 from dotenv import load_dotenv
+
+from .config import Config
 
 load_dotenv()
 
@@ -34,12 +37,29 @@ def decrypt(token: str, key: str) -> str:
     return data.decode("utf-8")
 
 
-def get_secret_key() -> str:
-    """Return the SECRET_KEY from the environment, raising if it is missing."""
+@lru_cache(maxsize=1)
+def _resolve_secret_key() -> str:
+    """Return the secret key from configuration or the environment."""
+
     secret = os.getenv("SECRET_KEY")
-    if not secret:
-        raise RuntimeError("SECRET_KEY environment variable is not set")
-    return secret
+    if secret:
+        return secret
+
+    config = Config()
+    secret_from_config = config.secret_key
+    if secret_from_config:
+        return secret_from_config
+
+    raise RuntimeError(
+        "SECRET_KEY is not configured. Set the SECRET_KEY environment variable or "
+        "define security.secret_key in config.yml."
+    )
+
+
+def get_secret_key() -> str:
+    """Return the secret key used for encrypting stored credentials."""
+
+    return _resolve_secret_key()
 
 
 __all__ = ["encrypt", "decrypt", "get_secret_key"]
