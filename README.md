@@ -1,11 +1,33 @@
-# eLKA
+# eLKA Studio
 
-Tento repozitář byl kompletně vyčištěn, aby bylo možné začít s čistým štítem. Aktuálně neobsahuje žádnou implementaci ani konfiguraci.
+eLKA Studio je webová aplikace pro lokální správu a procedurální generování lore pro fiktivní univerza. Tento repozitář nyní obsahuje počáteční strukturu projektu včetně backendu postaveného na FastAPI, šablon pro nové světy a skriptů pro snadnou instalaci.
 
-## Další kroky
+## Struktura projektu
 
-1. Navrhnout novou strukturu projektu a rozhodnout, jaké technologie budou použity.
-2. Postupně přidávat implementaci a průběžně dokumentovat veškeré změny.
-3. Vytvořit základní konfigurační soubory, testy a CI podle nových požadavků.
+```
+elka-studio/
+├── backend/
+│   └── app/
+│       ├── api/
+│       ├── core/
+│       ├── db/
+│       ├── models/
+│       ├── services/
+│       ├── templates/
+│       └── main.py
+├── frontend/
+├── scripts/
+└── requirements.txt
+```
 
-Dokumentaci udržujte aktuální při každém dalším kroku vývoje.
+Podrobné informace k jednotlivým částem naleznete v komentářích zdrojových souborů. Backend je připraven pro spuštění pomocí `uvicorn` a při startu automaticky vytvoří databázové tabulky.
+
+## Rychlý start
+
+1. `cd elka-studio`
+2. `make setup`
+3. `make run-backend`
+
+API poběží na adrese `http://127.0.0.1:8000`.
+
+Dokumentaci prosím udržujte aktuální i při dalších změnách.

@@ -1,0 +1,17 @@
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# Secrets & local config
+.env
+config.yml
+
+# Local storage
+*.db
+*.db-journal
+
+# Frontend
+frontend/node_modules/
+frontend/dist/
