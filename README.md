@@ -45,6 +45,10 @@ eLKA Studio is a full-stack application for building and managing fictional univ
 - When a project stores an encrypted Git token, Celery tasks now decrypt it and use a credential helper during `git push`, preventing repeated interactive GitHub login prompts during story processing or saga generation.
 - Celery workers now share a singleton application context (`backend/app/core/context.py`) that bootstraps configuration, AI adapters, Git helpers, and validation/archival services once per worker. Task payloads must include the `project_id` (and optionally `pr_id`) so the worker can retrieve the correct repository without reopening the FastAPI stack for every job.
 
+## Testing the Universe Consistency Engine
+- Execute `pytest elka-studio/backend/tests/test_uce_core.py` to run deterministic unit tests covering fact extraction, universe loading, planner no-op detection, and Git application helpers.
+- The suite provisions temporary Git repositories to simulate dry-run and apply flows, confirming that repeated runs emit explicit "no changes" notes instead of silent exits.
+
 ## Project Structure
 - `backend/` – FastAPI application, Celery configuration, and Python business logic.
 - `frontend/` – React + Vite single-page application for interacting with eLKA Studio.
