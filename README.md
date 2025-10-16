@@ -99,3 +99,15 @@ spuštěním každé kapitoly kontroluje, zda není pozastaven. Pokud ano,
 pravidelně čeká (30 s) a vyčkává na opětovné spuštění. Díky tomu lze
 dlouhé generování bezpečně pozastavit a opět rozběhnout bez zásahu do
 již rozpracovaných dat.
+
+## Frontend SPA
+
+První verze webového rozhraní je připravena ve složce `elka-studio/frontend` jako React + Vite aplikace. Pro její spuštění použijte:
+
+```bash
+cd elka-studio/frontend
+npm install
+npm run dev
+```
+
+Aplikace předpokládá běžící backend na adrese `http://localhost:8000/api`. Změnit ji lze přes proměnnou `VITE_API_BASE_URL`.

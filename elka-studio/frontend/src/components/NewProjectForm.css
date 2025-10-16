@@ -1,0 +1,139 @@
+.modal {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+}
+
+.modal__backdrop {
+  position: absolute;
+  inset: 0;
+  background: rgba(17, 24, 39, 0.6);
+}
+
+.modal__content {
+  position: relative;
+  background: #ffffff;
+  width: min(520px, 90%);
+  border-radius: 1rem;
+  box-shadow: 0 30px 60px -20px rgba(15, 23, 42, 0.45);
+  padding: 2rem;
+  animation: modal-fade-in 0.25s ease-out;
+}
+
+.modal__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 1.5rem;
+}
+
+.modal__close {
+  background: transparent;
+  border: none;
+  font-size: 1.75rem;
+  line-height: 1;
+  cursor: pointer;
+  color: #6b7280;
+}
+
+.modal__form {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.modal__field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  font-weight: 500;
+  color: #1f2937;
+}
+
+.modal__field input {
+  padding: 0.75rem 0.85rem;
+  border-radius: 0.6rem;
+  border: 1px solid #d1d5db;
+  font-size: 1rem;
+  transition: border-color 0.2s ease, box-shadow 0.2s ease;
+}
+
+.modal__field input:focus {
+  outline: none;
+  border-color: #f97316;
+  box-shadow: 0 0 0 4px rgba(249, 115, 22, 0.15);
+}
+
+.modal__alert {
+  border-radius: 0.65rem;
+  padding: 0.75rem 1rem;
+  font-size: 0.95rem;
+}
+
+.modal__alert--error {
+  background: #fee2e2;
+  color: #b91c1c;
+}
+
+.modal__alert--success {
+  background: #dcfce7;
+  color: #047857;
+}
+
+.modal__footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.75rem;
+  margin-top: 1rem;
+}
+
+.modal__primary,
+.modal__secondary {
+  border-radius: 0.6rem;
+  padding: 0.65rem 1.2rem;
+  font-weight: 600;
+  cursor: pointer;
+  border: none;
+  font-size: 0.95rem;
+  transition: transform 0.2s ease, box-shadow 0.2s ease, background 0.2s ease;
+}
+
+.modal__primary {
+  background: linear-gradient(135deg, #f97316, #fb923c);
+  color: #fff7ed;
+  box-shadow: 0 10px 20px -12px rgba(249, 115, 22, 0.8);
+}
+
+.modal__primary:disabled {
+  cursor: not-allowed;
+  opacity: 0.7;
+  box-shadow: none;
+}
+
+.modal__primary:not(:disabled):hover {
+  transform: translateY(-1px);
+  box-shadow: 0 18px 30px -18px rgba(249, 115, 22, 0.8);
+}
+
+.modal__secondary {
+  background: #f3f4f6;
+  color: #111827;
+}
+
+.modal__secondary:hover {
+  background: #e5e7eb;
+}
+
+@keyframes modal-fade-in {
+  0% {
+    opacity: 0;
+    transform: translateY(8px) scale(0.98);
+  }
+  100% {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
