@@ -5,11 +5,15 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 from datetime import datetime
+from pathlib import Path
 from typing import Dict, List
 
 from app.adapters.ai.base import BaseAIAdapter
 from app.adapters.git.base import GitAdapter
 from app.utils.config import Config
+
+from .extractor import _slugify
+from .schemas import FactEntity, FactEvent, FactGraph
 
 
 @dataclass(slots=True)
@@ -77,4 +81,51 @@ class ArchivistEngine:
         return f"{header}{story_content.strip()}\n"
 
 
-__all__ = ["ArchiveResult", "ArchivistEngine"]
+def load_universe(repo_path: Path) -> FactGraph:
+    """Parse the existing universe files into a :class:`FactGraph`."""
+
+    entities: list[FactEntity] = []
+    events: list[FactEvent] = []
+
+    objekty_dir = repo_path / "Objekty"
+    if objekty_dir.is_dir():
+        for path in sorted(objekty_dir.glob("*.md")):
+            text = path.read_text(encoding="utf-8")
+            titles = re.findall(r"^#\s*(.+)", text, flags=re.MULTILINE)
+            entity_type = "place" if "place" in path.stem.lower() else "other"
+            entities.append(
+                FactEntity(
+                    id=_slugify(path.stem),
+                    type=entity_type,
+                    summary=titles[0] if titles else path.stem,
+                )
+            )
+
+    legendy_dir = repo_path / "Legendy"
+    if legendy_dir.is_dir():
+        for path in sorted(legendy_dir.glob("*.md")):
+            text = path.read_text(encoding="utf-8")
+            titles = re.findall(r"^#\s*(.+)", text, flags=re.MULTILINE)
+            entities.append(
+                FactEntity(
+                    id=_slugify(path.stem),
+                    type="concept",
+                    summary=titles[0] if titles else path.stem,
+                )
+            )
+
+    for timeline in sorted(repo_path.glob("timeline.*")):
+        text = timeline.read_text(encoding="utf-8")
+        for line in text.splitlines():
+            if re.match(r"^\d", line.strip()):
+                events.append(
+                    FactEvent(
+                        id=_slugify(line),
+                        title=line.strip(),
+                    )
+                )
+
+    return FactGraph(entities=entities, events=events)
+
+
+__all__ = ["ArchiveResult", "ArchivistEngine", "load_universe"]
