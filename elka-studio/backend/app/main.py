@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from fastapi import FastAPI
 
-from .api import projects, tasks
+from .api import projects, tasks, websockets
 from .db.session import Base, engine
 
 # Import models so that SQLAlchemy registers the tables on metadata creation
@@ -15,6 +15,7 @@ def include_routers(application: FastAPI) -> None:
     """Attach all API routers to the provided application instance."""
     application.include_router(projects.router)
     application.include_router(tasks.router)
+    application.include_router(websockets.router)
 
 
 def create_app() -> FastAPI:

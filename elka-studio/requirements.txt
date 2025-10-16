@@ -1,7 +1,9 @@
+celery
 cryptography
 fastapi
 GitPython
 python-dotenv
 pyyaml
+redis
 sqlalchemy
 uvicorn[standard]

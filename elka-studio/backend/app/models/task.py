@@ -2,10 +2,21 @@
 
 from __future__ import annotations
 
+from datetime import datetime
 from typing import TYPE_CHECKING
 
-from sqlalchemy import Column, ForeignKey, Integer, String, Text
+from sqlalchemy import Column, DateTime, ForeignKey, Integer, String, Text, func
 from sqlalchemy.orm import Mapped, relationship
+
+
+class TaskStatus(str):
+    """String-based task statuses shared across the application."""
+
+    PENDING = "PENDING"
+    RUNNING = "RUNNING"
+    SUCCESS = "SUCCESS"
+    FAILURE = "FAILURE"
+    PAUSED = "PAUSED"
 
 from ..db.session import Base
 
@@ -21,9 +32,14 @@ class Task(Base):
     id: Mapped[int] = Column(Integer, primary_key=True, index=True)
     project_id: Mapped[int] = Column(Integer, ForeignKey("projects.id"), nullable=False)
     type: Mapped[str] = Column(String(255), nullable=False)
-    status: Mapped[str] = Column(String(50), nullable=False, default="pending")
+    status: Mapped[str] = Column(String(50), nullable=False, default=TaskStatus.PENDING)
+    celery_task_id: Mapped[str | None] = Column(String(255), nullable=True, index=True)
     log: Mapped[str | None] = Column(Text, nullable=True)
     progress: Mapped[int | None] = Column(Integer, nullable=True)
+    created_at: Mapped[datetime] = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    updated_at: Mapped[datetime] = Column(
+        DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now()
+    )
 
     project: Mapped["Project"] = relationship("Project", back_populates="tasks")
 
@@ -34,9 +50,12 @@ class Task(Base):
             "project_id": self.project_id,
             "type": self.type,
             "status": self.status,
+            "celery_task_id": self.celery_task_id,
             "log": self.log,
             "progress": self.progress,
+            "created_at": self.created_at.isoformat() if self.created_at else None,
+            "updated_at": self.updated_at.isoformat() if self.updated_at else None,
         }
 
 
-__all__ = ["Task"]
+__all__ = ["Task", "TaskStatus"]
