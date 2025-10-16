@@ -9,6 +9,95 @@ const initialFormState = {
   access_token: '',
 };
 
+const flattenValue = (value) => {
+  if (value === null || value === undefined || value === '') {
+    return [];
+  }
+
+  if (typeof value === 'string') {
+    return [value];
+  }
+
+  if (Array.isArray(value)) {
+    return value.reduce((acc, current) => acc.concat(flattenValue(current)), []);
+  }
+
+  if (typeof value === 'object') {
+    return Object.values(value).reduce((acc, current) => acc.concat(flattenValue(current)), []);
+  }
+
+  return [String(value)];
+};
+
+const normaliseItem = (item) => {
+  if (!item) {
+    return null;
+  }
+
+  if (typeof item === 'string') {
+    return item;
+  }
+
+  if (item.msg) {
+    const field = Array.isArray(item.loc) ? item.loc[item.loc.length - 1] : item.loc;
+    return field ? `${field}: ${item.msg}` : item.msg;
+  }
+
+  return flattenValue(item).join(' ');
+};
+
+const extractApiErrorMessage = (apiError) => {
+  const response = apiError.response;
+  const responseData = response?.data ?? {};
+  const { detail } = responseData;
+
+  let message = null;
+
+  if (Array.isArray(detail)) {
+    message = detail.map(normaliseItem).filter(Boolean).join(' ');
+  } else if (typeof detail === 'string') {
+    message = detail;
+  } else if (detail && typeof detail === 'object') {
+    message = flattenValue(detail).join(' ');
+  }
+
+  if (!message) {
+    const fallbackFields = ['message', 'error', 'errors'];
+    for (const field of fallbackFields) {
+      const value = responseData[field];
+      if (typeof value === 'string' && value.trim()) {
+        message = value;
+        break;
+      }
+      if (Array.isArray(value)) {
+        const flattened = value.map(normaliseItem).filter(Boolean).join(' ');
+        if (flattened) {
+          message = flattened;
+          break;
+        }
+      }
+
+      if (value && typeof value === 'object') {
+        const flattened = flattenValue(value).join(' ');
+        if (flattened) {
+          message = flattened;
+          break;
+        }
+      }
+    }
+  }
+
+  if (!message && apiError.message) {
+    message = apiError.message;
+  }
+
+  const statusDetails = response?.status
+    ? ` (HTTP ${response.status}${response.statusText ? ` ${response.statusText}` : ''})`
+    : '';
+
+  return `${message || 'Vytvoření projektu selhalo.'}${statusDetails}`.trim();
+};
+
 const NewProjectForm = ({ onClose, onCreated }) => {
   const [formData, setFormData] = useState(initialFormState);
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -39,27 +128,8 @@ const NewProjectForm = ({ onClose, onCreated }) => {
         onCreated();
       }
     } catch (apiError) {
-      const { detail } = apiError.response?.data ?? {};
-      let message = 'Vytvoření projektu selhalo.';
-
-      if (Array.isArray(detail)) {
-        message = detail
-          .map((item) => {
-            if (!item) return null;
-            if (typeof item === 'string') return item;
-            if (item.msg) {
-              const field = Array.isArray(item.loc) ? item.loc[item.loc.length - 1] : item.loc;
-              return field ? `${field}: ${item.msg}` : item.msg;
-            }
-            return JSON.stringify(item);
-          })
-          .filter(Boolean)
-          .join(' ');
-      } else if (detail) {
-        message = detail;
-      }
-
-      setError(message);
+      console.error('Project creation failed', apiError);
+      setError(extractApiErrorMessage(apiError));
     } finally {
       setIsSubmitting(false);
     }
