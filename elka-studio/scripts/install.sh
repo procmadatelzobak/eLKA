@@ -47,8 +47,13 @@ fi
 echo "\nSetting up backend environment..."
 cd "$BACKEND_DIR"
 
-if [[ ! -d venv ]]; then
-    echo "Creating Python virtual environment..."
+if [[ ! -d venv || ! -f venv/bin/activate ]]; then
+    if [[ -d venv ]]; then
+        echo "Existing virtual environment is incomplete. Recreating..."
+        rm -rf venv
+    else
+        echo "Creating Python virtual environment..."
+    fi
     python3 -m venv venv
 else
     echo "Reusing existing Python virtual environment."
