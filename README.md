@@ -59,14 +59,32 @@ frontend může reagovat na změny v reálném čase. Konfiguraci připojení k
 Redis brokeru lze upravit proměnnou prostředí `CELERY_BROKER_URL`
 (viz `.env.example`).
 
-### Nový pipeline pro zpracování příběhů
+### Generační a zpracovatelský pipeline pro příběhy
 
-Celery worker nyní obsahuje úlohu `process_story`, která propojuje
-validátor a archivátora jádra eLKA. Endpoint `POST /tasks/` přijímá
-typ úlohy `process_story` a v klíči `params.story_content` očekává text
-vyprávění. Úloha nejprve provede kontrolu formátu, kontinuity a tónu a
-v případě úspěchu uloží příběh do složky `lore/stories/` v projektu.
-Výstup je následně zapsán do Git repozitáře, commitnut a odeslán na
+Celery worker nyní obsahuje kompletní dvojici úloh pro kreativní tvorbu
+i následné zpracování. Úloha `generate_story` vezme zadané "seed"
+a pomocí generátoru připraví plně strukturovaný příběh včetně
+metadata bloku. Jakmile je text hotový, vytvoří navazující úlohu
+`process_story`, která propojuje validátor a archivátora jádra eLKA.
+
+Endpoint `POST /tasks/` přijímá typy `generate_story` (parametr
+`seed`), `generate_saga` (parametry `theme` a `chapters`) a stále také
+`process_story` (parametr `story_content`). První dva typy generují
+nový obsah a automaticky zakládají navazující zpracovatelské úlohy,
+takže není nutné volat validaci/archivaci ručně.
+
+Po dohotovení jednotlivých kapitol nebo celých ság je výstup uložen do
+projektu v adresáři `lore/stories/`, následně commitnut a odeslán na
 odpovídající PR větev. Stav každé fáze je průběžně zapisován do logu
 úlohy, takže frontend i websocket klienti mají okamžitý přehled o
 postupu.
+
+#### Řízení dlouhých generačních úloh
+
+Pro dlouho běžící úlohy (např. generování ságy) jsou k dispozici nové
+endpointy `POST /tasks/{task_id}/pause` a `POST /tasks/{task_id}/resume`.
+Pauza nastaví stav úlohy na `PAUSED` a orchestrátor ságy před
+spuštěním každé kapitoly kontroluje, zda není pozastaven. Pokud ano,
+pravidelně čeká (30 s) a vyčkává na opětovné spuštění. Díky tomu lze
+dlouhé generování bezpečně pozastavit a opět rozběhnout bez zásahu do
+již rozpracovaných dat.
