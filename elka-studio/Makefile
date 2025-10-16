@@ -1,4 +1,4 @@
-.PHONY: all setup run-dev run-frontend stop clean
+.PHONY: all setup run-dev run-backend run-frontend stop clean
 
 # Default target
 all: run-dev
@@ -10,8 +10,12 @@ setup:
 
 # Runs the full development stack (backend, celery, redis)
 run-dev:
-@echo "Starting development servers... (Use Ctrl+C to stop)"
+@echo "Starting full development stack (API + Celery + frontend)... (Use Ctrl+C to stop)"
 @cd backend && bash ../scripts/run-dev.sh
+
+run-backend:
+@echo "Starting backend development stack without frontend... (Use Ctrl+C to stop)"
+@cd backend && bash ../scripts/run-dev.sh backend-only
 
 # (Optional but helpful) Runs the frontend development server
 run-frontend:

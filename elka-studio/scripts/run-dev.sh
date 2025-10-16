@@ -4,6 +4,12 @@ set -euo pipefail
 
 ACTION=${1:-run}
 
+RUN_FRONTEND=1
+if [[ "$ACTION" == "backend-only" ]]; then
+    RUN_FRONTEND=0
+    ACTION="run"
+fi
+
 ROOT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 REDIS_CONTAINER_NAME="elka-studio-redis"
 REDIS_CONTAINER_STARTED=0
@@ -11,6 +17,7 @@ BACKEND_DIR="$ROOT_DIR/backend"
 BACKEND_VENV="$BACKEND_DIR/venv"
 UVICORN_BIN="$BACKEND_VENV/bin/uvicorn"
 CELERY_BIN="$BACKEND_VENV/bin/celery"
+FRONTEND_DIR="$ROOT_DIR/frontend"
 
 ensure_backend_tools() {
     if [[ ! -d "$BACKEND_VENV" ]]; then
@@ -21,6 +28,27 @@ ensure_backend_tools() {
     if [[ ! -x "$UVICORN_BIN" || ! -x "$CELERY_BIN" ]]; then
         echo "Required backend tools are missing from the virtual environment. Re-run 'make setup' to install Python dependencies." >&2
         exit 1
+    fi
+}
+
+ensure_frontend_tools() {
+    if [[ $RUN_FRONTEND -eq 0 ]]; then
+        return
+    fi
+
+    if [[ ! -d "$FRONTEND_DIR" ]]; then
+        echo "Frontend directory not found at '$FRONTEND_DIR'." >&2
+        exit 1
+    fi
+
+    if ! command -v npm >/dev/null 2>&1; then
+        echo "npm is required to run the frontend development server. Install Node.js 20+ or rerun 'make setup'." >&2
+        exit 1
+    fi
+
+    if [[ ! -d "$FRONTEND_DIR/node_modules" ]]; then
+        echo "Installing frontend dependencies (npm install)..."
+        (cd "$FRONTEND_DIR" && npm install)
     fi
 }
 
@@ -78,6 +106,7 @@ cleanup() {
     echo "Stopping development processes..."
     [[ -n "${UVICORN_PID:-}" ]] && kill "${UVICORN_PID}" 2>/dev/null || true
     [[ -n "${CELERY_PID:-}" ]] && kill "${CELERY_PID}" 2>/dev/null || true
+    [[ -n "${FRONTEND_PID:-}" ]] && kill "${FRONTEND_PID}" 2>/dev/null || true
 
     if [[ ${REDIS_CONTAINER_STARTED} -eq 1 ]]; then
         stop_redis_container 1
@@ -86,6 +115,7 @@ cleanup() {
 
 ensure_redis
 ensure_backend_tools
+ensure_frontend_tools
 
 trap cleanup EXIT
 
@@ -101,4 +131,18 @@ echo "Starting Celery worker..."
 "$CELERY_BIN" -A app.celery_app.celery_app worker --loglevel=info &
 CELERY_PID=$!
 
-wait -n "${UVICORN_PID}" "${CELERY_PID}"
+if [[ $RUN_FRONTEND -eq 1 ]]; then
+    echo "Starting frontend development server..."
+    (
+        cd "$FRONTEND_DIR"
+        npm run dev -- --host 0.0.0.0 --port 5173
+    ) &
+    FRONTEND_PID=$!
+fi
+
+PIDS=("${UVICORN_PID}" "${CELERY_PID}")
+if [[ -n "${FRONTEND_PID:-}" ]]; then
+    PIDS+=("${FRONTEND_PID}")
+fi
+
+wait -n "${PIDS[@]}"
