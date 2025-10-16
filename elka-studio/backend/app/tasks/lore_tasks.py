@@ -5,76 +5,22 @@ from __future__ import annotations
 import json
 import time
 from datetime import datetime
-from pathlib import Path
 from textwrap import dedent
 
 from celery.utils.log import get_task_logger
-from sqlalchemy.orm import Session, joinedload
 
-from app.adapters.ai.base import get_default_ai_adapter
-from app.adapters.git.base import GitAdapter
 from app.celery_app import celery_app
-from app.core.archivist import ArchivistEngine
-from app.core.validator import ValidatorEngine
+from app.core.context import app_context
 from app.db.session import SessionLocal
 from app.models.project import Project
 from app.models.task import Task, TaskStatus
 from app.services.task_manager import TaskManager
-from app.utils.config import Config
-from app.utils.security import decrypt
 
 logger = get_task_logger(__name__)
 
 
-def _get_task_with_project(session: Session, task_db_id: int) -> Task:
-    task: Task | None = (
-        session.query(Task)
-        .options(joinedload(Task.project))
-        .filter(Task.id == task_db_id)
-        .one_or_none()
-    )
-    if task is None:
-        raise ValueError(f"Task with id {task_db_id} does not exist")
-    if task.project is None:
-        raise ValueError(f"Task {task_db_id} is not linked to a project")
-    return task
-
-
-def _ensure_project_path(project: Project, config: Config) -> Path:
-    project_path_str = project.local_path or str(config.projects_dir / project.name)
-    project_path = Path(project_path_str)
-    if not project_path.exists():
-        raise FileNotFoundError(
-            f"Project path '{project_path}' does not exist. Synchronise the project before retrying."
-        )
-    return project_path
-
-
-def _resolve_git_token(project: Project, config: Config) -> str | None:
-    encrypted = project.git_token
-    if not encrypted:
-        return None
-
-    secret_key = config.secret_key
-    if not secret_key:
-        logger.warning(
-            "Project %s has a stored Git token but no secret key is configured.",
-            project.id,
-        )
-        return None
-
-    try:
-        return decrypt(encrypted, secret_key)
-    except Exception as exc:  # pragma: no cover - defensive logging
-        logger.error(
-            "Failed to decrypt Git token for project %s: %s",
-            project.id,
-            exc,
-        )
-        return None
-
-
-def _generate_metadata_block(project: Project, seed: str, config: Config) -> str:
+def _generate_metadata_block(project: Project, seed: str) -> str:
+    config = app_context.config
     generated_at = datetime.utcnow().replace(microsecond=0).isoformat() + "Z"
     title = seed.strip().split("\n", maxsplit=1)[0].strip().title() or "Untitled Saga Entry"
     metadata = {
@@ -89,8 +35,8 @@ def _generate_metadata_block(project: Project, seed: str, config: Config) -> str
     return "\n".join(lines)
 
 
-def _write_story(seed: str, project: Project, config: Config) -> str:
-    metadata = _generate_metadata_block(project, seed, config)
+def _write_story(seed: str, project: Project) -> str:
+    metadata = _generate_metadata_block(project, seed)
     premise = seed.strip() or "An unexpected development in the eLKA universe."
     paragraphs = dedent(
         f"""
@@ -166,12 +112,17 @@ def _wait_while_paused(task_db_id: int, interval_seconds: int = 30) -> None:
 
 
 @celery_app.task(bind=True, name="app.tasks.lore_tasks.process_story_task")
-def process_story_task(self, task_db_id: int, story_content: str) -> None:
+def process_story_task(
+    self,
+    task_db_id: int,
+    project_id: int,
+    story_content: str,
+    pr_id: int | None = None,
+) -> None:
     """Execute the story validation and archival pipeline."""
 
     manager = TaskManager()
     celery_task_id = self.request.id
-    config = Config()
 
     manager.update_task_status(
         celery_task_id,
@@ -180,45 +131,52 @@ def process_story_task(self, task_db_id: int, story_content: str) -> None:
         log_message=f"Task {task_db_id}: starting story processing pipeline.",
     )
 
-    session = SessionLocal()
     try:
-        task = _get_task_with_project(session, task_db_id)
-        project = task.project
-        assert project is not None  # for mypy
-
-        project_path = _ensure_project_path(project, config)
-
-        ai_adapter = get_default_ai_adapter(config)
-        git_token = _resolve_git_token(project, config)
-        git_adapter = GitAdapter(
-            project_path=project_path,
-            config=config,
-            token=git_token,
+        project = app_context.git_manager.get_project_from_db(project_id)
+        manager.update_task_status(
+            celery_task_id,
+            TaskStatus.RUNNING,
+            progress=10,
+            log_message=f"Loaded project '{project.name}'. Preparing adapters...",
         )
-        validator = ValidatorEngine(ai_adapter=ai_adapter, config=config)
-        archivist = ArchivistEngine(git_adapter=git_adapter, ai_adapter=ai_adapter, config=config)
+
+        git_adapter = app_context.create_git_adapter(project)
+        if pr_id is not None:
+            logger.debug(
+                "process_story_task %s operating on project %s for PR %s",
+                task_db_id,
+                project.id,
+                pr_id,
+            )
+        archivist = app_context.create_archivist(git_adapter)
+        validator = app_context.validator
+
+        project_path = app_context.git_manager.resolve_project_path(project)
+        universe_files = app_context.git_manager.load_universe_files(project_path)
 
         manager.update_task_status(
             celery_task_id,
             TaskStatus.RUNNING,
-            progress=20,
-            log_message="Validation pipeline started.",
+            progress=25,
+            log_message="Validating story content...",
         )
-        validation_report = validator.validate(story_content)
+
+        validation_report = validator.validate(story_content, universe_files)
         for step in validation_report.steps:
             manager.update_task_status(
                 celery_task_id,
                 TaskStatus.RUNNING,
-                progress=30,
+                progress=35,
                 log_message=step.summary(),
             )
 
         if not validation_report.passed:
+            messages = " | ".join(validation_report.failed_messages())
             manager.update_task_status(
                 celery_task_id,
                 TaskStatus.FAILURE,
-                progress=35,
-                log_message="Validation failed; aborting archival.",
+                progress=40,
+                log_message=f"Validation failed: {messages}",
             )
             return
 
@@ -226,9 +184,12 @@ def process_story_task(self, task_db_id: int, story_content: str) -> None:
             celery_task_id,
             TaskStatus.RUNNING,
             progress=55,
-            log_message="Validation passed. Starting archival step.",
+            log_message="Validation passed. Archiving story...",
         )
-        archive_result = archivist.archive(story_content)
+
+        archive_result = archivist.archive(story_content, universe_files)
+        files_to_commit: dict[str, str] = dict(archive_result.files)
+
         for message in archive_result.log_messages:
             manager.update_task_status(
                 celery_task_id,
@@ -237,13 +198,12 @@ def process_story_task(self, task_db_id: int, story_content: str) -> None:
                 log_message=message,
             )
 
-        files_to_commit: dict[str, str] = dict(archive_result.files)
         if not files_to_commit:
             manager.update_task_status(
                 celery_task_id,
                 TaskStatus.FAILURE,
                 progress=70,
-                log_message="Archival did not return any files to commit.",
+                log_message="Archival produced no files to commit.",
             )
             return
 
@@ -254,8 +214,9 @@ def process_story_task(self, task_db_id: int, story_content: str) -> None:
             celery_task_id,
             TaskStatus.RUNNING,
             progress=80,
-            log_message="Committing story to project repository.",
+            log_message="Committing story to project repository...",
         )
+
         git_adapter.update_pr_branch(files=files_to_commit, commit_message=commit_message)
 
         manager.update_task_status(
@@ -272,17 +233,20 @@ def process_story_task(self, task_db_id: int, story_content: str) -> None:
             log_message=f"Task {task_db_id} failed: {exc}",
         )
         raise
-    finally:
-        session.close()
 
 
 @celery_app.task(bind=True, name="app.tasks.lore_tasks.generate_story_from_seed_task")
-def generate_story_from_seed_task(self, task_db_id: int, seed: str) -> None:
+def generate_story_from_seed_task(
+    self,
+    task_db_id: int,
+    project_id: int,
+    seed: str,
+    pr_id: int | None = None,
+) -> None:
     """Generate a story from a seed idea and enqueue processing."""
 
     manager = TaskManager()
     celery_task_id = self.request.id
-    config = Config()
 
     manager.update_task_status(
         celery_task_id,
@@ -291,34 +255,32 @@ def generate_story_from_seed_task(self, task_db_id: int, seed: str) -> None:
         log_message=f"Task {task_db_id}: starting story generation from seed.",
     )
 
-    session = SessionLocal()
     try:
-        task = _get_task_with_project(session, task_db_id)
-        project = task.project
-        assert project is not None
-
+        project = app_context.git_manager.get_project_from_db(project_id)
         manager.update_task_status(
             celery_task_id,
             TaskStatus.RUNNING,
-            progress=25,
-            log_message="Drafting story content via generator model.",
+            progress=20,
+            log_message=f"Generating draft for project '{project.name}'.",
         )
 
-        ai_adapter = get_default_ai_adapter(config)
-        _ = ai_adapter  # placeholder to emphasise generator usage
-        story_content = _write_story(seed, project, config)
+        story_content = _write_story(seed, project)
 
         manager.update_task_status(
             celery_task_id,
             TaskStatus.RUNNING,
-            progress=60,
+            progress=55,
             log_message="Story drafted. Scheduling processing pipeline.",
         )
+
+        process_params = {"story_content": story_content}
+        if pr_id is not None:
+            process_params["pr_id"] = pr_id
 
         process_task = manager.create_task(
             project_id=project.id,
             task_type="process_story",
-            params={"story_content": story_content},
+            params=process_params,
         )
 
         manager.update_task_status(
@@ -338,12 +300,17 @@ def generate_story_from_seed_task(self, task_db_id: int, seed: str) -> None:
             log_message=f"Task {task_db_id} failed: {exc}",
         )
         raise
-    finally:
-        session.close()
 
 
 @celery_app.task(bind=True, name="app.tasks.lore_tasks.generate_saga_task")
-def generate_saga_task(self, task_db_id: int, theme: str, chapters: int) -> None:
+def generate_saga_task(
+    self,
+    task_db_id: int,
+    project_id: int,
+    theme: str,
+    chapters: int,
+    pr_id: int | None = None,
+) -> None:
     """Plan a saga and dispatch story generation subtasks."""
 
     if chapters < 1:
@@ -351,7 +318,6 @@ def generate_saga_task(self, task_db_id: int, theme: str, chapters: int) -> None
 
     manager = TaskManager()
     celery_task_id = self.request.id
-    config = Config()
 
     manager.update_task_status(
         celery_task_id,
@@ -360,17 +326,14 @@ def generate_saga_task(self, task_db_id: int, theme: str, chapters: int) -> None
         log_message=f"Task {task_db_id}: planning a {chapters}-part saga for theme '{theme}'.",
     )
 
-    session = SessionLocal()
     try:
-        task = _get_task_with_project(session, task_db_id)
-        project = task.project
-        assert project is not None
+        project = app_context.git_manager.get_project_from_db(project_id)
 
         manager.update_task_status(
             celery_task_id,
             TaskStatus.RUNNING,
             progress=20,
-            log_message="Requesting saga outline from generator model.",
+            log_message=f"Creating saga outline for '{project.name}'.",
         )
 
         plan = _plan_saga(theme, chapters)
@@ -402,10 +365,13 @@ def generate_saga_task(self, task_db_id: int, theme: str, chapters: int) -> None
                     f"Dispatching chapter {index}/{chapters}: {chapter['title']}."
                 ),
             )
+            params = {"seed": chapter["seed"]}
+            if pr_id is not None:
+                params["pr_id"] = pr_id
             sub_task = manager.create_task(
                 project_id=project.id,
                 task_type="generate_story",
-                params={"seed": chapter["seed"]},
+                params=params,
             )
             current_status_after_dispatch = _get_current_status(task_db_id)
             if current_status_after_dispatch == TaskStatus.PAUSED:
@@ -445,8 +411,6 @@ def generate_saga_task(self, task_db_id: int, theme: str, chapters: int) -> None
             log_message=f"Task {task_db_id} failed: {exc}",
         )
         raise
-    finally:
-        session.close()
 
 
 __all__ = [

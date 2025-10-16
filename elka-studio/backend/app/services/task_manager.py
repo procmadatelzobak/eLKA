@@ -23,7 +23,8 @@ class TaskManager:
     def create_task(self, project_id: int, task_type: str, params: dict | None = None) -> Task:
         """Create a task record and dispatch the corresponding Celery job."""
 
-        params = params or {}
+        params = dict(params or {})
+        params.setdefault("project_id", project_id)
         session = self._session_factory()
         try:
             task = Task(project_id=project_id, type=task_type, status=TaskStatus.PENDING)

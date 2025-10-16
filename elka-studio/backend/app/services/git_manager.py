@@ -7,17 +7,28 @@ import os
 import shutil
 import subprocess
 from pathlib import Path
+from typing import Callable, Iterable
 
 import git
 from git.exc import GitCommandError
 
 
+from app.db.session import SessionLocal
+from app.models.project import Project
+from sqlalchemy.orm import Session
+
+
 class GitManager:
     """High-level helper that wraps GitPython interactions."""
 
-    def __init__(self, projects_dir: str):
+    def __init__(
+        self,
+        projects_dir: str,
+        session_factory: Callable[[], Session] = SessionLocal,
+    ):
         self.projects_dir = Path(projects_dir).expanduser()
         self.projects_dir.mkdir(parents=True, exist_ok=True)
+        self._session_factory = session_factory
 
     def clone_repo(self, git_url: str, project_name: str, token: str | None) -> Path:
         """Clone a repository into the managed projects directory."""
@@ -192,6 +203,77 @@ class GitManager:
             with repo.config_writer() as writer:
                 writer.set_value("user", "name", "eLKA Studio")
                 writer.set_value("user", "email", "studio@elka.local")
+
+    # ------------------------------------------------------------------
+    # Helpers exposed to Celery workers
+    # ------------------------------------------------------------------
+    def get_project_from_db(self, project_id: int) -> Project:
+        """Load a project record from the database and detach it from the session."""
+
+        session = self._session_factory()
+        try:
+            project = (
+                session.query(Project)
+                .filter(Project.id == project_id)
+                .one_or_none()
+            )
+            if project is None:
+                raise ValueError(f"Project with id {project_id} does not exist")
+            session.expunge(project)
+            return project
+        finally:
+            session.close()
+
+    def resolve_project_path(self, project: Project) -> Path:
+        """Return the local filesystem path for ``project``.
+
+        The path is resolved using the stored ``local_path`` when available. If
+        the project has not been synchronised yet, fall back to the configured
+        projects directory combined with the normalised project name.
+        """
+
+        if project.local_path:
+            candidate = Path(project.local_path).expanduser()
+        else:
+            candidate = self.projects_dir / self._normalize_project_name(project.name)
+
+        if not candidate.exists():
+            raise FileNotFoundError(
+                f"Project path '{candidate}' does not exist. Synchronise the project before retrying."
+            )
+        return candidate
+
+    def load_universe_files(
+        self,
+        project_path: Path | str,
+        *,
+        suffixes: Iterable[str] = (".md", ".markdown", ".txt", ".json", ".yaml", ".yml"),
+    ) -> dict[str, str]:
+        """Return a mapping of relative file paths to their textual contents.
+
+        The helper is primarily used by Celery workers to supply contextual
+        information to validation and archival services. Binary files are
+        skipped silently.
+        """
+
+        root = Path(project_path).expanduser()
+        if not root.exists():
+            raise FileNotFoundError(f"Project path '{root}' does not exist")
+
+        allowed_suffixes = {suffix.lower() for suffix in suffixes}
+        contents: dict[str, str] = {}
+        for candidate in root.rglob("*"):
+            if not candidate.is_file():
+                continue
+            if allowed_suffixes and candidate.suffix.lower() not in allowed_suffixes:
+                continue
+            try:
+                text = candidate.read_text(encoding="utf-8")
+            except UnicodeDecodeError:
+                continue
+            relative = candidate.relative_to(root)
+            contents[str(relative)] = text
+        return contents
 
 
 __all__ = ["GitManager"]

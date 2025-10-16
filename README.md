@@ -41,6 +41,7 @@ eLKA Studio is a full-stack application for building and managing fictional univ
 - Existing clients should be updated to use the new field names to avoid validation errors.
 - Manual story submissions must send the text inside the `params.story_content` field when calling `POST /api/tasks/`. The dashboard form handles this automatically, but custom integrations should update their payloads to avoid `story_content must be a non-empty string` errors.
 - When a project stores an encrypted Git token, Celery tasks now decrypt it and use a credential helper during `git push`, preventing repeated interactive GitHub login prompts during story processing or saga generation.
+- Celery workers now share a singleton application context (`backend/app/core/context.py`) that bootstraps configuration, AI adapters, Git helpers, and validation/archival services once per worker. Task payloads must include the `project_id` (and optionally `pr_id`) so the worker can retrieve the correct repository without reopening the FastAPI stack for every job.
 
 ## Project Structure
 - `backend/` – FastAPI application, Celery configuration, and Python business logic.
