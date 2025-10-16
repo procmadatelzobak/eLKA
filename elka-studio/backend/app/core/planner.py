@@ -38,6 +38,10 @@ def plan_changes(current: FactGraph, incoming: FactGraph, repo_path: Path) -> Ch
         if not new_content.endswith("\n"):
             new_content = f"{new_content}\n"
 
+        if old_content:
+            new_content = f"{old_content.rstrip()}\n\n## Update\n{entity.summary or ''}\n"
+        else:
+            new_content = f"# {entity.id}\n{(entity.summary or '').strip()}\n"
         files.append(
             ChangesetFile(
                 path=str(target.relative_to(repo_path)),
@@ -51,6 +55,7 @@ def plan_changes(current: FactGraph, incoming: FactGraph, repo_path: Path) -> Ch
         if not files
         else f"Planned updates for {len(files)} universe file(s)."
     )
+    summary = f"Planned updates for {len(files)} universe file(s)."
     return Changeset(files=files, summary=summary)
 
 
