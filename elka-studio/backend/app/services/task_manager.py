@@ -88,6 +88,8 @@ class TaskManager:
         task_map = {
             "dummy": "app.tasks.dummy_task",
             "dummy_task": "app.tasks.dummy_task",
+            "process_story": "app.tasks.lore_tasks.process_story_task",
+            "process_story_task": "app.tasks.lore_tasks.process_story_task",
         }
         if task_type not in task_map:
             raise ValueError(f"Unknown task type '{task_type}'.")
