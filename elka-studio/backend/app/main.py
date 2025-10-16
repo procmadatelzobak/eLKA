@@ -48,11 +48,15 @@ def _configure_cors(application: FastAPI) -> None:
     )
 
 
+API_PREFIX = "/api"
+
+
 def include_routers(application: FastAPI) -> None:
     """Attach all API routers to the provided application instance."""
-    application.include_router(projects.router)
-    application.include_router(root.router)
-    application.include_router(tasks.router)
+    api_routers: List = [projects.router, root.router, tasks.router]
+    for router in api_routers:
+        application.include_router(router, prefix=API_PREFIX)
+
     application.include_router(websockets.router)
 
 
