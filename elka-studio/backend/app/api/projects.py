@@ -6,11 +6,12 @@ import os
 import shutil
 from pathlib import Path
 from typing import List, Optional
+from urllib.parse import urlparse
 
 import git
 import yaml
 from fastapi import APIRouter, Depends, HTTPException, status
-from pydantic import BaseModel
+from pydantic import BaseModel, validator
 from sqlalchemy.orm import Session
 
 from ..db.session import get_session
@@ -27,6 +28,46 @@ class ProjectCreateRequest(BaseModel):
     name: str
     git_url: str
     git_token: Optional[str] = None
+
+    @validator("name")
+    def validate_name(cls, value: str) -> str:
+        """Ensure the project name is usable as a directory name."""
+        cleaned = value.strip()
+        if not cleaned:
+            raise ValueError("Project name must not be empty.")
+        if cleaned in {".", ".."}:
+            raise ValueError("Project name cannot be '.' or '..'.")
+        if any(sep and sep in cleaned for sep in (os.sep, os.altsep)):
+            raise ValueError("Project name must not contain path separators.")
+        return cleaned
+
+    @validator("git_url")
+    def validate_git_url(cls, value: str) -> str:
+        """Normalise Git URLs and allow the shorthand owner/repo form."""
+        cleaned = value.strip()
+        if not cleaned:
+            raise ValueError("Git repository URL must not be empty.")
+
+        if cleaned.count("/") == 1 and "//" not in cleaned and not cleaned.startswith("git@"):
+            owner, repo = (part.strip() for part in cleaned.split("/", 1))
+            if not owner or not repo:
+                raise ValueError("GitHub repository shorthand must be in the form 'owner/repository'.")
+            return f"https://github.com/{owner}/{repo}"
+
+        parsed = urlparse(cleaned)
+        if not parsed.scheme and not cleaned.startswith("git@"):
+            raise ValueError(
+                "Git repository must be a full URL (https://...) or in the form 'owner/repository'."
+            )
+        return cleaned
+
+    @validator("git_token", pre=True)
+    def normalize_git_token(cls, value: Optional[str]) -> Optional[str]:
+        """Strip empty tokens so public repositories can be imported without credentials."""
+        if value is None:
+            return None
+        token = value.strip()
+        return token or None
 
 
 @router.get("/", summary="List projects")
@@ -70,13 +111,19 @@ def create_project(payload: ProjectCreateRequest, session: Session = Depends(get
 
         try:
             local_path = git_manager.clone_repo(payload.git_url, payload.name, payload.git_token)
+        except FileExistsError as exc:
+            session.rollback()
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=str(exc),
+            ) from exc
         except Exception as exc:  # pragma: no cover - network dependent
             session.rollback()
             if target_path.exists():
                 shutil.rmtree(target_path, ignore_errors=True)
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"Failed to clone repository: {exc}",
+                detail=str(exc),
             ) from exc
 
         try:
