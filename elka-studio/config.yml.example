@@ -8,6 +8,17 @@ storage:
   projects_dir: "~/.elka/projects"
   database_file: "~/.elka/elka.db"
 
+git:
+  default_branch: "main"
+
+ai:
+  model: "heuristic-v1"
+
+stories:
+  directory: "stories"
+  extension: ".md"
+  timestamp_format: "%Y%m%d-%H%M%S"
+
 # Cross-origin resource sharing
 cors:
   allow_origins:
