@@ -1,0 +1,3 @@
+# Ignore generated drafts and caches
+Drafts/
+.cache/
