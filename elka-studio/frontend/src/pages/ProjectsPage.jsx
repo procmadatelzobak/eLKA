@@ -86,7 +86,7 @@ const ProjectsPage = () => {
                   />
                 </div>
                 <p className="projects-page__card-meta">
-                  {project.repository_url || 'Bez repozitáře'}
+                  {project.git_url || 'Bez repozitáře'}
                 </p>
                 <p className="projects-page__card-status">{project.status ?? 'neznámý stav'}</p>
               </article>
