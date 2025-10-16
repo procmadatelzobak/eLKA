@@ -37,3 +37,15 @@ src/
 ## API klient
 
 Soubor `src/services/api.js` definuje instanci Axiosu s výchozí adresou `http://localhost:8000/api`. Pro změnu použijte `.env` soubor s proměnnou `VITE_API_BASE_URL`.
+
+## Projektový dashboard
+
+Stránka `ProjectDashboardPage` slouží jako hlavní pracovní prostředí pro konkrétní projekt. Umožňuje odesílat nové úlohy agentovi eLKA (zpracování příběhu, generování z seed hodnoty nebo vytvoření ságy) a v reálném čase sledovat jejich stav prostřednictvím WebSocketu.
+
+- Ovládací panel se stará o validaci a odeslání požadavků pomocí funkce `createTask` z modulu `src/services/api.js`.
+- Fronta úloh využívá službu `TaskSocket` (`src/services/websocket.js`) pro připojení na endpoint `/ws/tasks/{projectId}` a zobrazuje průběh včetně logů.
+- Akce pozastavení a opětovného spuštění úlohy lze volat funkcemi `pauseTask` a `resumeTask`.
+
+### Konfigurace WebSocketu
+
+Výchozí adresa pro WebSocket se odvozuje od `VITE_API_BASE_URL`. Pokud backend běží na jiné adrese nebo portu, je možné jej přepsat proměnnou prostředí `VITE_WS_BASE_URL` (např. `ws://localhost:8000`).
