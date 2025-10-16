@@ -5,9 +5,8 @@ from __future__ import annotations
 import configparser
 import os
 import shutil
+import subprocess
 from pathlib import Path
-from typing import Optional
-from urllib.parse import urlparse, urlunparse
 
 import git
 from git.exc import GitCommandError
@@ -27,14 +26,36 @@ class GitManager:
         if target_path.exists():
             raise FileExistsError(f"Project path already exists: {target_path}")
 
-        auth_url = self._build_authenticated_url(git_url, token)
+        command = ["git", "clone", git_url, str(target_path)]
+        env = self._build_git_env(token)
+
+        if token:
+            helper_path = Path(__file__).parent / "git_credential_helper.sh"
+            command = [
+                "git",
+                "-c",
+                f"credential.helper=!sh {helper_path.resolve()}",
+                "clone",
+                git_url,
+                str(target_path),
+            ]
+
         try:
-            git.Repo.clone_from(auth_url, target_path)
-        except GitCommandError as exc:  # pragma: no cover - network interaction
-            raise RuntimeError(f"Failed to clone repository: {exc.stderr or exc}") from exc
+            subprocess.run(
+                command,
+                check=True,
+                capture_output=True,
+                text=True,
+                env=env,
+            )
+        except subprocess.CalledProcessError as exc:  # pragma: no cover - network interaction
+            message = exc.stderr or exc.stdout or str(exc)
+            raise RuntimeError(f"Failed to clone repository: {message}") from exc
         return target_path
 
-    def initialize_empty_repo(self, repo_path: Path, scaffold_path: Path) -> None:
+    def _initialize_empty_repo(
+        self, repo_path: Path, scaffold_path: Path, token: str | None
+    ) -> None:
         """Populate an empty repository with the default universe scaffold."""
         if not repo_path.exists():
             raise FileNotFoundError(f"Repository path does not exist: {repo_path}")
@@ -61,8 +82,40 @@ class GitManager:
         repo.git.add(all=True)
         repo.index.commit("Initialize universe scaffold")
 
-        origin = repo.remote(name="origin")
-        origin.push(refspec=f"{branch_name}:{branch_name}")
+        command = [
+            "git",
+            "-C",
+            str(repo_path),
+            "push",
+            "origin",
+            f"{branch_name}:{branch_name}",
+        ]
+        env = self._build_git_env(token)
+
+        if token:
+            helper_path = Path(__file__).parent / "git_credential_helper.sh"
+            command = [
+                "git",
+                "-c",
+                f"credential.helper=!sh {helper_path.resolve()}",
+                "-C",
+                str(repo_path),
+                "push",
+                "origin",
+                f"{branch_name}:{branch_name}",
+            ]
+
+        try:
+            subprocess.run(
+                command,
+                check=True,
+                capture_output=True,
+                text=True,
+                env=env,
+            )
+        except subprocess.CalledProcessError as exc:  # pragma: no cover - network interaction
+            message = exc.stderr or exc.stdout or str(exc)
+            raise RuntimeError(f"Failed to push repository scaffold: {message}") from exc
 
     def pull_updates(self, project_name: str) -> None:
         """Pull the latest changes from the remote default branch."""
@@ -95,15 +148,15 @@ class GitManager:
         return normalized
 
     @staticmethod
-    def _build_authenticated_url(git_url: str, token: Optional[str]) -> str:
-        if not token:
-            return git_url
-        parsed = urlparse(git_url)
-        if parsed.scheme not in {"http", "https"}:
-            raise ValueError("Token-based authentication is only supported for HTTP(S) URLs")
-        netloc = parsed.netloc.split("@")[-1]
-        auth_netloc = f"oauth2:{token}@{netloc}"
-        return urlunparse((parsed.scheme, auth_netloc, parsed.path, parsed.params, parsed.query, parsed.fragment))
+    def _build_git_env(token: str | None) -> dict[str, str]:
+        env = os.environ.copy()
+        env["GIT_ASKPASS"] = "true"
+        env["GIT_TERMINAL_PROMPT"] = "0"
+        if token:
+            env["GIT_TOKEN"] = token
+        else:
+            env.pop("GIT_TOKEN", None)
+        return env
 
     @staticmethod
     def _determine_branch(repo: git.Repo) -> str:

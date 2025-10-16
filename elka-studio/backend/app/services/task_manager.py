@@ -7,8 +7,8 @@ from typing import Callable
 from celery.result import AsyncResult
 from sqlalchemy.orm import Session
 
-from app.api.websockets import connection_manager
 from app.celery_app import celery_app
+from app.db.redis_client import get_redis_client
 from app.db.session import SessionLocal
 from app.models.task import Task, TaskStatus
 
@@ -18,6 +18,7 @@ class TaskManager:
 
     def __init__(self, session_factory: Callable[[], Session] = SessionLocal) -> None:
         self._session_factory = session_factory
+        self._redis_client = get_redis_client()
 
     def create_task(self, project_id: int, task_type: str, params: dict | None = None) -> Task:
         """Create a task record and dispatch the corresponding Celery job."""
@@ -100,11 +101,14 @@ class TaskManager:
             raise ValueError(f"Unknown task type '{task_type}'.")
         return task_map[task_type]
 
-    @staticmethod
-    def _broadcast_update(project_id: int) -> None:
-        """Notify websocket listeners about task updates."""
+    def _broadcast_update(self, project_id: int) -> None:
+        """Publish task update notifications to Redis for websocket listeners."""
 
-        connection_manager.notify_project(project_id)
+        channel = f"project_{project_id}_tasks"
+        try:
+            self._redis_client.publish(channel, "update")
+        except Exception:  # pragma: no cover - network/redis dependent
+            pass
 
 
 __all__ = ["TaskManager"]
