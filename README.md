@@ -22,6 +22,11 @@ eLKA Studio is a full-stack application for building and managing fictional univ
    Klíč se bezpečně uloží pouze do vašeho prohlížeče (localStorage) a okamžitě se použije pro všechny požadavky frontendové aplikace.
 8. Vraťte se na stránku **Projects** a klikněte na tlačítko **Add/Import Project** – stejné rozhraní nyní podporuje inicializaci nového i napojení na existující lore vesmír. Formulář přijímá jak zkrácený tvar `uzivatel/projekt`, tak plnou Git URL; pokud se import nezdaří, dialog nyní zobrazí text chyby společně s HTTP statusem a kompletní traceback se objeví v konzoli backendu, takže problém snadno dohledáte přímo v příkazové řádce.
 
+## Konfigurace
+- CORS politika backendu je nyní načítána z `config.yml` (sekce `cors.allow_origins`). Výchozí hodnoty povolují vývojářský frontend na
+  adresách `http://127.0.0.1:5173` a `http://localhost:5173`. Potřebujete-li další domény, přidejte je do seznamu nebo použijte proměnnou
+  prostředí `ELKA_ALLOWED_ORIGINS` s čárkami oddělenými URL adresami.
+
 ## API Notes
 - When creating projects programmatically, send `name`, `git_url`, and (optionally) `git_token` in the request body to `/projects`. The API normalises GitHub zkrácený zápis `owner/repo` na plnou URL a vrací lidsky čitelné chyby pro neplatné vstupy.
 - The backend root endpoint (`/`) now returns a short status payload confirming the API is reachable and linking to the interactive documentation at `/docs`.

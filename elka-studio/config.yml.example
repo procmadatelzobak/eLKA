@@ -7,3 +7,9 @@ server:
 storage:
   projects_dir: "~/.elka/projects"
   database_file: "~/.elka/elka.db"
+
+# Cross-origin resource sharing
+cors:
+  allow_origins:
+    - "http://127.0.0.1:5173"
+    - "http://localhost:5173"

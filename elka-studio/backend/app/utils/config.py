@@ -1,54 +1,43 @@
-"""Configuration helper for eLKA Studio core services."""
+"""Utility helpers for loading eLKA Studio configuration files."""
 
 from __future__ import annotations
 
 import os
-from dataclasses import dataclass
-from datetime import datetime
 from pathlib import Path
+from typing import Any, Dict, Optional
+
+import yaml
 
 
-@dataclass(slots=True)
-class Config:
-    """Application configuration focused on lore processing utilities."""
+def find_config_file() -> Optional[Path]:
+    """Return the first configuration file discovered for the application."""
+    env_path = os.getenv("ELKA_CONFIG_PATH")
+    if env_path:
+        candidate = Path(env_path).expanduser()
+        if candidate.is_file():
+            return candidate
 
-    projects_dir: Path = Path("~/.elka/projects").expanduser()
-    default_branch: str = "main"
-    story_directory: Path = Path("lore/stories")
-    story_extension: str = ".md"
-    ai_model: str = "stub-model"
+    for parent in Path(__file__).resolve().parents:
+        config_path = parent / "config.yml"
+        if config_path.is_file():
+            return config_path
+        alt_path = parent / "config.yaml"
+        if alt_path.is_file():
+            return alt_path
 
-    def __post_init__(self) -> None:
-        self.projects_dir = Path(os.getenv("ELKA_PROJECTS_DIR", self.projects_dir)).expanduser()
-        self.default_branch = os.getenv("ELKA_DEFAULT_BRANCH", self.default_branch)
-        story_dir = os.getenv("ELKA_STORY_DIR")
-        if story_dir:
-            self.story_directory = Path(story_dir)
-        story_extension = os.getenv("ELKA_STORY_EXTENSION")
-        if story_extension:
-            if not story_extension.startswith("."):
-                story_extension = f".{story_extension}"
-            self.story_extension = story_extension
-        self.ai_model = os.getenv("ELKA_AI_MODEL", self.ai_model)
-
-    def story_filename(self, prefix: str | None = None) -> str:
-        """Return a timestamped filename for a story using the configured extension."""
-
-        base = prefix or "story"
-        timestamp = datetime.utcnow().strftime("%Y%m%d-%H%M%S")
-        return f"{base}-{timestamp}{self.story_extension}"
-
-    def ensure_story_directory(self, project_path: Path) -> Path:
-        """Ensure the story directory exists for the given project."""
-
-        target = Path(project_path) / self.story_directory
-        target.mkdir(parents=True, exist_ok=True)
-        return target
-
-    def story_path(self, project_path: Path, filename: str) -> Path:
-        """Build an absolute path for a story file within the project."""
-
-        return self.ensure_story_directory(project_path) / filename
+    return None
 
 
-__all__ = ["Config"]
+def load_config() -> Dict[str, Any]:
+    """Load the application configuration from disk if available."""
+    config_file = find_config_file()
+    if not config_file:
+        return {}
+
+    with config_file.open("r", encoding="utf-8") as handle:
+        data = yaml.safe_load(handle) or {}
+
+    return data
+
+
+__all__ = ["find_config_file", "load_config"]

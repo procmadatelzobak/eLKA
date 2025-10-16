@@ -10,7 +10,6 @@ from typing import List, Optional
 from urllib.parse import urlparse
 
 import git
-import yaml
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, validator
 from sqlalchemy.orm import Session
@@ -18,6 +17,7 @@ from sqlalchemy.orm import Session
 from ..db.session import get_session
 from ..models.project import Project
 from ..services import GitManager
+from ..utils.config import load_config
 from ..utils.security import encrypt, get_secret_key
 
 logger = logging.getLogger(__name__)
@@ -211,33 +211,12 @@ def _resolve_projects_dir() -> Path:
     if env_override:
         return Path(env_override).expanduser()
 
-    config_file = _find_config_file()
-    if config_file:
-        with config_file.open("r", encoding="utf-8") as handle:
-            data = yaml.safe_load(handle) or {}
-        projects_dir = data.get("storage", {}).get("projects_dir")
-        if projects_dir:
-            return Path(projects_dir).expanduser()
+    config = load_config()
+    projects_dir = config.get("storage", {}).get("projects_dir")
+    if projects_dir:
+        return Path(projects_dir).expanduser()
 
     return Path("~/.elka/projects").expanduser()
-
-
-def _find_config_file() -> Path | None:
-    """Locate the configuration file by walking up from this module."""
-    env_path = os.getenv("ELKA_CONFIG_PATH")
-    if env_path:
-        candidate = Path(env_path).expanduser()
-        if candidate.is_file():
-            return candidate
-
-    for parent in Path(__file__).resolve().parents:
-        config_path = parent / "config.yml"
-        if config_path.is_file():
-            return config_path
-        alt_path = parent / "config.yaml"
-        if alt_path.is_file():
-            return alt_path
-    return None
 
 
 __all__ = [
