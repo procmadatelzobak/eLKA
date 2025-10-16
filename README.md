@@ -26,6 +26,8 @@ eLKA Studio is a full-stack application for building and managing fictional univ
 - CORS politika backendu je nyní načítána z `config.yml` (sekce `cors.allow_origins`). Výchozí hodnoty povolují vývojářský frontend na
   adresách `http://127.0.0.1:5173` a `http://localhost:5173`. Potřebujete-li další domény, přidejte je do seznamu nebo použijte proměnnou
   prostředí `ELKA_ALLOWED_ORIGINS` s čárkami oddělenými URL adresami.
+  Inicializace CORS middleware probíhá ještě před registrací routerů, takže backend i Celery worker modul spolehlivě načtou bez chyb
+  `NameError`.
 - Soubor `config.yml` podporuje také sekce `git`, `ai` a `stories`. Pomocí nich určíte výchozí Git větev (`git.default_branch`), název
   modelu použitý v metadatech generovaných příběhů (`ai.model`) a pravidla pro archivaci příběhů (`stories.directory`, `stories.extension`,
   `stories.timestamp_format`). Pokud soubor chybí, aplikace automaticky použije bezpečné výchozí hodnoty.
