@@ -128,6 +128,7 @@ const ProjectDashboardPage = () => {
     const payload = {
       project_id: projectId,
       type,
+      params: {},
     };
 
     if (type === 'process_story') {
@@ -135,7 +136,8 @@ const ProjectDashboardPage = () => {
         setFormError('Nejprve vložte text příběhu.');
         return;
       }
-      payload.story = storyContent.trim();
+      const content = storyContent.trim();
+      payload.params.story_content = content;
     }
 
     if (type === 'generate_story') {
@@ -143,7 +145,9 @@ const ProjectDashboardPage = () => {
         setFormError('Zadejte seed pro generování.');
         return;
       }
-      payload.seed = seedValue.trim();
+      const seed = seedValue.trim();
+      payload.seed = seed;
+      payload.params.seed = seed;
     }
 
     if (type === 'generate_saga') {
@@ -158,8 +162,11 @@ const ProjectDashboardPage = () => {
         return;
       }
 
-      payload.theme = sagaTheme.trim();
+      const theme = sagaTheme.trim();
+      payload.theme = theme;
       payload.chapters = chapters;
+      payload.params.theme = theme;
+      payload.params.chapters = chapters;
     }
 
     setIsSubmitting(true);
