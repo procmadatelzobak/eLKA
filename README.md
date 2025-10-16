@@ -58,3 +58,15 @@ publikován přes WebSocket endpoint `/ws/tasks/{project_id}`, takže
 frontend může reagovat na změny v reálném čase. Konfiguraci připojení k
 Redis brokeru lze upravit proměnnou prostředí `CELERY_BROKER_URL`
 (viz `.env.example`).
+
+### Nový pipeline pro zpracování příběhů
+
+Celery worker nyní obsahuje úlohu `process_story`, která propojuje
+validátor a archivátora jádra eLKA. Endpoint `POST /tasks/` přijímá
+typ úlohy `process_story` a v klíči `params.story_content` očekává text
+vyprávění. Úloha nejprve provede kontrolu formátu, kontinuity a tónu a
+v případě úspěchu uloží příběh do složky `lore/stories/` v projektu.
+Výstup je následně zapsán do Git repozitáře, commitnut a odeslán na
+odpovídající PR větev. Stav každé fáze je průběžně zapisován do logu
+úlohy, takže frontend i websocket klienti mají okamžitý přehled o
+postupu.

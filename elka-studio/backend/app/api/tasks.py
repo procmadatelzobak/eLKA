@@ -22,7 +22,7 @@ class TaskCreateRequest(BaseModel):
 
     project_id: int
     task_type: str = Field(..., alias="type")
-    params: dict[str, Any] = Field(default_factory=dict)
+    params: dict[str, Any] = Field(default_factory=dict, description="Additional task parameters")
 
     class Config:
         allow_population_by_field_name = True
@@ -39,8 +39,18 @@ def list_tasks(session: Session = Depends(get_session)) -> List[dict]:
 def create_task(payload: TaskCreateRequest) -> dict:
     """Create a new task and dispatch it to the background queue."""
 
+    params = dict(payload.params)
+    if payload.task_type in {"process_story", "process_story_task"}:
+        story_content = params.get("story_content")
+        if not isinstance(story_content, str) or not story_content.strip():
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="story_content must be a non-empty string",
+            )
+        params["story_content"] = story_content
+
     try:
-        task = task_manager.create_task(payload.project_id, payload.task_type, payload.params)
+        task = task_manager.create_task(payload.project_id, payload.task_type, params)
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
 
