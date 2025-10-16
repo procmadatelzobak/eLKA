@@ -33,8 +33,8 @@ eLKA Studio is a full-stack application for building and managing fictional univ
   `stories.timestamp_format`). Pokud soubor chybí, aplikace automaticky použije bezpečné výchozí hodnoty.
 
 ## API Notes
-- When creating projects programmatically, send `name`, `git_url`, and (optionally) `git_token` in the request body to `/projects`. The API normalises GitHub zkrácený zápis `owner/repo` na plnou URL a vrací lidsky čitelné chyby pro neplatné vstupy.
-- The backend root endpoint (`/`) now returns a short status payload confirming the API is reachable and linking to the interactive documentation at `/docs`.
+- When creating projects programmatically, send `name`, `git_url`, and (optionally) `git_token` in the request body to `/api/projects`. The API normalises GitHub zkrácený zápis `owner/repo` na plnou URL a vrací lidsky čitelné chyby pro neplatné vstupy.
+- The backend root endpoint (`/api/`) now returns a short status payload confirming the API is reachable and linking to the interactive documentation at `/docs`.
 - Existing clients should be updated to use the new field names to avoid validation errors.
 
 ## Project Structure
