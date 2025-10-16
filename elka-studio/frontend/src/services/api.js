@@ -1,22 +1,35 @@
 import axios from 'axios';
 
 export const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000/api';
+export const GEMINI_API_KEY_STORAGE_KEY = 'geminiApiKey';
 
-const apiClient = axios.create({
-  baseURL: API_BASE_URL,
-  headers: {
+export const getApiClient = () => {
+  const apiKey = typeof window !== 'undefined'
+    ? window.localStorage.getItem(GEMINI_API_KEY_STORAGE_KEY)
+    : null;
+
+  const headers = {
     'Content-Type': 'application/json',
-  },
-});
+  };
 
-export const getProjects = () => apiClient.get('/projects/');
+  if (apiKey) {
+    headers.Authorization = `Bearer ${apiKey}`;
+  }
 
-export const createProject = (projectData) => apiClient.post('/projects/', projectData);
+  return axios.create({
+    baseURL: API_BASE_URL,
+    headers,
+  });
+};
 
-export const createTask = (taskData) => apiClient.post('/tasks/', taskData);
+export const getProjects = () => getApiClient().get('/projects/');
 
-export const pauseTask = (taskId) => apiClient.post(`/tasks/${taskId}/pause`);
+export const createProject = (projectData) => getApiClient().post('/projects/', projectData);
 
-export const resumeTask = (taskId) => apiClient.post(`/tasks/${taskId}/resume`);
+export const createTask = (taskData) => getApiClient().post('/tasks/', taskData);
 
-export default apiClient;
+export const pauseTask = (taskId) => getApiClient().post(`/tasks/${taskId}/pause`);
+
+export const resumeTask = (taskId) => getApiClient().post(`/tasks/${taskId}/resume`);
+
+export default getApiClient;

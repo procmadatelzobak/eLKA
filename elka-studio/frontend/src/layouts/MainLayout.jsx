@@ -14,7 +14,10 @@ const MainLayout = () => (
         <NavLink to="/" end className={navLinkClass}>
           Projects
         </NavLink>
-        <span className="sidebar__link sidebar__link--disabled">Settings (soon)</span>
+        <NavLink to="/settings" className={navLinkClass}>
+          <span aria-hidden>⚙️</span>
+          <span className="sidebar__link-text">Settings</span>
+        </NavLink>
       </nav>
     </aside>
     <main className="content">
