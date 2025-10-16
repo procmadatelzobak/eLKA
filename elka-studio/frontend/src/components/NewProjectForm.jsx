@@ -29,8 +29,8 @@ const NewProjectForm = ({ onClose, onCreated }) => {
     try {
       await createProject({
         name: formData.name.trim(),
-        repository_url: formData.repository_url.trim(),
-        access_token: formData.access_token,
+        git_url: formData.repository_url.trim(),
+        git_token: formData.access_token,
       });
 
       setSuccess('Projekt byl úspěšně vytvořen.');

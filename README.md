@@ -17,6 +17,10 @@ eLKA Studio is a full-stack application for building and managing fictional univ
 5. (Optional) In a second terminal, run `make run-frontend` for hot-reloading the UI.
 6. Open [http://localhost:5173](http://localhost:5173) in your browser.
 
+## API Notes
+- When creating projects programmatically, send `name`, `git_url`, and (optionally) `git_token` in the request body to `/projects`.
+- Existing clients should be updated to use the new field names to avoid validation errors.
+
 ## Project Structure
 - `backend/` – FastAPI application, Celery configuration, and Python business logic.
 - `frontend/` – React + Vite single-page application for interacting with eLKA Studio.

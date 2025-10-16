@@ -111,22 +111,32 @@ def _plan_saga(theme: str, chapters: int) -> list[dict[str, str]]:
     return plan
 
 
+def _get_current_status(task_db_id: int) -> TaskStatus | None:
+    session = SessionLocal()
+    try:
+        status: TaskStatus | None = (
+            session.query(Task.status)
+            .filter(Task.id == task_db_id)
+            .scalar()
+        )
+    finally:
+        session.close()
+
+    return status
+
+
 def _wait_while_paused(task_db_id: int, interval_seconds: int = 30) -> None:
     while True:
-        session = SessionLocal()
-        try:
-            status = (
-                session.query(Task.status)
-                .filter(Task.id == task_db_id)
-                .scalar()
-            )
-        finally:
-            session.close()
+        status = _get_current_status(task_db_id)
 
         if status != TaskStatus.PAUSED:
             break
 
-        logger.info("Task %s is paused; waiting %s seconds before rechecking.", task_db_id, interval_seconds)
+        logger.info(
+            "Task %s is paused; waiting %s seconds before rechecking.",
+            task_db_id,
+            interval_seconds,
+        )
         time.sleep(interval_seconds)
 
 
@@ -346,6 +356,14 @@ def generate_saga_task(self, task_db_id: int, theme: str, chapters: int) -> None
 
         for index, chapter in enumerate(plan, start=1):
             _wait_while_paused(task_db_id)
+            current_status = _get_current_status(task_db_id)
+            if current_status == TaskStatus.PAUSED:
+                logger.info(
+                    "Saga task %s paused. Halting chapter dispatch.",
+                    task_db_id,
+                )
+                break
+
             manager.update_task_status(
                 celery_task_id,
                 TaskStatus.RUNNING,
@@ -359,6 +377,15 @@ def generate_saga_task(self, task_db_id: int, theme: str, chapters: int) -> None
                 task_type="generate_story",
                 params={"seed": chapter["seed"]},
             )
+            current_status_after_dispatch = _get_current_status(task_db_id)
+            if current_status_after_dispatch == TaskStatus.PAUSED:
+                logger.info(
+                    "Saga task %s paused after dispatching chapter %s. Skipping status update.",
+                    task_db_id,
+                    chapter["title"],
+                )
+                break
+
             manager.update_task_status(
                 celery_task_id,
                 TaskStatus.RUNNING,
@@ -367,12 +394,19 @@ def generate_saga_task(self, task_db_id: int, theme: str, chapters: int) -> None
                 ),
             )
 
-        manager.update_task_status(
-            celery_task_id,
-            TaskStatus.SUCCESS,
-            progress=100,
-            log_message="Saga generation tasks dispatched successfully.",
-        )
+        final_status = _get_current_status(task_db_id)
+        if final_status == TaskStatus.PAUSED:
+            logger.info(
+                "Saga task %s remains paused; completion status will be set later.",
+                task_db_id,
+            )
+        else:
+            manager.update_task_status(
+                celery_task_id,
+                TaskStatus.SUCCESS,
+                progress=100,
+                log_message="Saga generation tasks dispatched successfully.",
+            )
     except Exception as exc:  # pragma: no cover - defensive logging
         logger.exception("generate_saga_task failed: %s", exc)
         manager.update_task_status(
