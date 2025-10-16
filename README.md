@@ -32,7 +32,7 @@ Run `bash scripts/update.sh` (or `make setup` again) to pull the latest code and
 
 ## Troubleshooting
 - **Redis connection errors**: Ensure Redis is available locally or via Docker. Use `make stop` to clean up the development container.
-- **Backend fails to start**: Confirm that `backend/venv` exists and that `backend/.env` contains valid configuration values.
+- **Backend fails to start**: Confirm that `backend/venv` exists and that `backend/.env` contains valid configuration values. If the virtual environment becomes corrupted or is missing activation scripts, rerun `make setup` to let the installer recreate it automatically.
 - **Node dependencies missing**: Re-run `npm install` inside the `frontend/` directory or execute `make setup`.
 
 Happy world-building!
