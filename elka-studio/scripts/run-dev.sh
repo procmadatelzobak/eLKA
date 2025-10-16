@@ -7,6 +7,22 @@ ACTION=${1:-run}
 ROOT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 REDIS_CONTAINER_NAME="elka-studio-redis"
 REDIS_CONTAINER_STARTED=0
+BACKEND_DIR="$ROOT_DIR/backend"
+BACKEND_VENV="$BACKEND_DIR/venv"
+UVICORN_BIN="$BACKEND_VENV/bin/uvicorn"
+CELERY_BIN="$BACKEND_VENV/bin/celery"
+
+ensure_backend_tools() {
+    if [[ ! -d "$BACKEND_VENV" ]]; then
+        echo "Backend virtual environment not found at '$BACKEND_VENV'. Run 'make setup' first." >&2
+        exit 1
+    fi
+
+    if [[ ! -x "$UVICORN_BIN" || ! -x "$CELERY_BIN" ]]; then
+        echo "Required backend tools are missing from the virtual environment. Re-run 'make setup' to install Python dependencies." >&2
+        exit 1
+    fi
+}
 
 stop_redis_container() {
     local quiet=${1:-0}
@@ -69,19 +85,20 @@ cleanup() {
 }
 
 ensure_redis
+ensure_backend_tools
 
 trap cleanup EXIT
 
 export PYTHONPATH="${ROOT_DIR}/backend:${PYTHONPATH:-}"
 
-cd "${ROOT_DIR}/backend"
+cd "$BACKEND_DIR"
 
 echo "Starting FastAPI server..."
-uvicorn app.main:app --reload --host 0.0.0.0 --port 8000 &
+"$UVICORN_BIN" app.main:app --reload --host 0.0.0.0 --port 8000 &
 UVICORN_PID=$!
 
 echo "Starting Celery worker..."
-celery -A app.celery_app.celery_app worker --loglevel=info &
+"$CELERY_BIN" -A app.celery_app.celery_app worker --loglevel=info &
 CELERY_PID=$!
 
 wait -n "${UVICORN_PID}" "${CELERY_PID}"
