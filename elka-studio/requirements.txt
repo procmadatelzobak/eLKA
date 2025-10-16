@@ -1,5 +1,7 @@
+cryptography
 fastapi
-uvicorn[standard]
-sqlalchemy
+GitPython
 python-dotenv
 pyyaml
+sqlalchemy
+uvicorn[standard]
