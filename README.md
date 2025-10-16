@@ -50,6 +50,12 @@ Citlivé údaje, jako jsou přístupové tokeny ke Git službám, jsou ukládán
 (např. v souboru `.env`). Pro synchronizaci již vytvořeného projektu použijte
 endpoint `POST /projects/{project_id}/sync`.
 
+Proces vytvoření projektu nyní probíhá plně transakčně: pokud klonování nebo
+inicializace scaffoldu selže, databázový záznam se vrátí zpět a lokální složka
+se vyčistí, takže můžete operaci bezpečně zopakovat. Přístupový token pro Git
+se navíc nikdy neukládá do `.git/config` – při klonování i pushi se předává
+jen dočasnému helper skriptu přes proměnné prostředí.
+
 ## Background úlohy a real-time aktualizace
 
 Do projektu byla integrována kombinace Celery + Redis pro spouštění
@@ -58,6 +64,11 @@ publikován přes WebSocket endpoint `/ws/tasks/{project_id}`, takže
 frontend může reagovat na změny v reálném čase. Konfiguraci připojení k
 Redis brokeru lze upravit proměnnou prostředí `CELERY_BROKER_URL`
 (viz `.env.example`).
+
+WebSocket server nyní naslouchá Redis Pub/Sub kanálům (`project_{id}_tasks`),
+které zapojují i Celery workery běžící v oddělených procesech. Tím je zajištěno,
+že všechny aktualizace úloh se dostanou ke klientům bez ohledu na to, kde byly
+generovány.
 
 ### Generační a zpracovatelský pipeline pro příběhy
 
