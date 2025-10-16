@@ -21,6 +21,7 @@ from app.models.project import Project
 from app.models.task import Task, TaskStatus
 from app.services.task_manager import TaskManager
 from app.utils.config import Config
+from app.utils.security import decrypt
 
 logger = get_task_logger(__name__)
 
@@ -47,6 +48,30 @@ def _ensure_project_path(project: Project, config: Config) -> Path:
             f"Project path '{project_path}' does not exist. Synchronise the project before retrying."
         )
     return project_path
+
+
+def _resolve_git_token(project: Project, config: Config) -> str | None:
+    encrypted = project.git_token
+    if not encrypted:
+        return None
+
+    secret_key = config.secret_key
+    if not secret_key:
+        logger.warning(
+            "Project %s has a stored Git token but no secret key is configured.",
+            project.id,
+        )
+        return None
+
+    try:
+        return decrypt(encrypted, secret_key)
+    except Exception as exc:  # pragma: no cover - defensive logging
+        logger.error(
+            "Failed to decrypt Git token for project %s: %s",
+            project.id,
+            exc,
+        )
+        return None
 
 
 def _generate_metadata_block(project: Project, seed: str, config: Config) -> str:
@@ -164,7 +189,12 @@ def process_story_task(self, task_db_id: int, story_content: str) -> None:
         project_path = _ensure_project_path(project, config)
 
         ai_adapter = get_default_ai_adapter(config)
-        git_adapter = GitAdapter(project_path=project_path, config=config)
+        git_token = _resolve_git_token(project, config)
+        git_adapter = GitAdapter(
+            project_path=project_path,
+            config=config,
+            token=git_token,
+        )
         validator = ValidatorEngine(ai_adapter=ai_adapter, config=config)
         archivist = ArchivistEngine(git_adapter=git_adapter, ai_adapter=ai_adapter, config=config)
 

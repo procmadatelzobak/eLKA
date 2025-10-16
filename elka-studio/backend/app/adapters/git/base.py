@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import os
+import subprocess
 from pathlib import Path
 from typing import Iterable
 
@@ -14,11 +16,26 @@ from app.utils.config import Config
 class GitAdapter:
     """High-level helper for staging and pushing lore updates."""
 
-    def __init__(self, project_path: Path | str, config: Config) -> None:
+    def __init__(
+        self,
+        project_path: Path | str,
+        config: Config,
+        token: str | None = None,
+    ) -> None:
         self.project_path = Path(project_path).expanduser()
         if not self.project_path.exists():
             raise FileNotFoundError(f"Project path does not exist: {self.project_path}")
         self.config = config
+        self._token = token
+        self._credential_helper = (
+            Path(__file__).resolve().parent.parent.parent
+            / "services"
+            / "git_credential_helper.sh"
+        )
+        if self._token and not self._credential_helper.is_file():  # pragma: no cover - defensive
+            raise FileNotFoundError(
+                f"Credential helper script not found at {self._credential_helper}"
+            )
         try:
             self.repo = git.Repo(self.project_path)
         except git.InvalidGitRepositoryError as exc:  # pragma: no cover - defensive branch
@@ -43,13 +60,54 @@ class GitAdapter:
 
     def _push(self, branch: str) -> None:
         try:
-            remote = self.repo.remote(name="origin")
+            self.repo.remote(name="origin")
         except ValueError as exc:  # pragma: no cover - remote missing
             raise RuntimeError("No 'origin' remote configured for repository") from exc
+
+        command = [
+            "git",
+            "-C",
+            str(self.project_path),
+            "push",
+            "origin",
+            f"{branch}:{branch}",
+        ]
+        if self._token:
+            helper = self._credential_helper
+            command = [
+                "git",
+                "-c",
+                f"credential.helper=!sh {helper.resolve()}",
+                "-C",
+                str(self.project_path),
+                "push",
+                "origin",
+                f"{branch}:{branch}",
+            ]
+
+        env = self._build_git_env()
+
         try:
-            remote.push(refspec=f"{branch}:{branch}")
-        except GitCommandError as exc:  # pragma: no cover - network interaction
-            raise RuntimeError(f"Failed to push changes: {exc.stderr or exc}") from exc
+            subprocess.run(
+                command,
+                check=True,
+                capture_output=True,
+                text=True,
+                env=env,
+            )
+        except subprocess.CalledProcessError as exc:  # pragma: no cover - network interaction
+            message = exc.stderr or exc.stdout or str(exc)
+            raise RuntimeError(f"Failed to push changes: {message}") from exc
+
+    def _build_git_env(self) -> dict[str, str]:
+        env = os.environ.copy()
+        env["GIT_TERMINAL_PROMPT"] = "0"
+        env["GIT_ASKPASS"] = "true"
+        if self._token:
+            env["GIT_TOKEN"] = self._token
+        else:
+            env.pop("GIT_TOKEN", None)
+        return env
 
     def update_pr_branch(self, files: dict[str, str], commit_message: str) -> None:
         """Write files, create a commit, and push the branch to origin."""
