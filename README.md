@@ -18,6 +18,9 @@ eLKA Studio is a full-stack application for building and managing fictional univ
 4. Launch the stack with `make run-dev`. The command now starts the FastAPI server, Celery worker, Redis, and the Vite frontend on [http://localhost:5173](http://localhost:5173).
 5. Need only the backend APIs? Run `make run-backend` to skip the frontend server.
 6. The UI is automatically available at [http://localhost:5173](http://localhost:5173).
+7. Při prvním spuštění otevřete v levém panelu stránku **Settings** (ikona ozubeného kola) a uložte svůj Gemini API Key.
+   Klíč se bezpečně uloží pouze do vašeho prohlížeče (localStorage) a okamžitě se použije pro všechny požadavky frontendové aplikace.
+8. Vraťte se na stránku **Projects** a klikněte na tlačítko **Add/Import Project** – stejné rozhraní nyní podporuje inicializaci nového i napojení na existující lore vesmír.
 
 ## API Notes
 - When creating projects programmatically, send `name`, `git_url`, and (optionally) `git_token` in the request body to `/projects`.

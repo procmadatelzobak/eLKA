@@ -57,6 +57,10 @@ const NewProjectForm = ({ onClose, onCreated }) => {
           </button>
         </header>
         <form className="modal__form" onSubmit={handleSubmit}>
+          <p className="modal__description">
+            If the repository is empty, eLKA will initialize it with a default universe structure. If the
+            repository already contains a lore universe, eLKA will simply connect to it.
+          </p>
           <label className="modal__field">
             <span>Název projektu</span>
             <input
