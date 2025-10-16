@@ -12,6 +12,8 @@ eLKA Studio is a full-stack application for building and managing fictional univ
 ## Quick Start
 1. Clone the repository: `git clone <repo-url> && cd elka-studio`
 2. Install everything with `make setup` (see `scripts/install.sh` for details).
+   The installer now verifies required system packages (Python, npm, Redis, etc.) and will attempt to install any
+   missing dependencies automatically. Be ready to enter your administrator password if prompted.
 3. Update `backend/.env` with your secrets (use the suggested `SECRET_KEY` from the installer).
 4. Launch the stack with `make run-dev`.
 5. (Optional) In a second terminal, run `make run-frontend` for hot-reloading the UI.
@@ -28,7 +30,7 @@ eLKA Studio is a full-stack application for building and managing fictional univ
 - `Makefile` – Unified entry point for setup, development, and maintenance tasks.
 
 ## Updating the Project
-Run `bash scripts/update.sh` (or `make setup` again) to pull the latest code and refresh dependencies. Keep your virtual environment active when working on the backend.
+Run `bash scripts/update.sh` (or `make setup` again) to pull the latest code and refresh dependencies. The update script performs the same dependency checks as the installer, ensuring tools such as Redis and npm stay available. Keep your virtual environment active when working on the backend.
 
 ## Troubleshooting
 - **Redis connection errors**: Ensure Redis is available locally or via Docker. Use `make stop` to clean up the development container.
