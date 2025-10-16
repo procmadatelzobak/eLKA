@@ -1,113 +1,34 @@
 # eLKA Studio
 
-eLKA Studio je webová aplikace pro lokální správu a procedurální generování lore pro fiktivní univerza. Tento repozitář nyní obsahuje počáteční strukturu projektu včetně backendu postaveného na FastAPI, šablon pro nové světy a skriptů pro snadnou instalaci.
+eLKA Studio is a full-stack application for building and managing fictional universes. It combines a FastAPI backend, a Celery-powered task pipeline, and a React/Vite frontend to deliver a cohesive world-building experience.
 
-## Struktura projektu
+## Features
+- **Project management dashboard** – Create, organize, and synchronize projects across local and remote Git repositories.
+- **Real-time task queue** – Monitor Celery jobs through Redis-backed WebSockets for immediate progress updates.
+- **Story & saga generation** – Launch AI-assisted generation pipelines for single stories or multi-chapter sagas.
+- **Automated lore processing** – Validate, archive, and version generated content with Git integration.
+- **Extensible architecture** – Modular backend services and a modern React frontend designed for customization.
 
-```
-elka-studio/
-├── backend/
-│   └── app/
-│       ├── api/
-│       ├── core/
-│       ├── db/
-│       ├── models/
-│       ├── services/
-│       ├── templates/
-│       └── main.py
-├── frontend/
-├── scripts/
-└── requirements.txt
-```
+## Quick Start
+1. Clone the repository: `git clone <repo-url> && cd elka-studio`
+2. Install everything with `make setup` (see `scripts/install.sh` for details).
+3. Update `backend/.env` with your secrets (use the suggested `SECRET_KEY` from the installer).
+4. Launch the stack with `make run-dev`.
+5. (Optional) In a second terminal, run `make run-frontend` for hot-reloading the UI.
+6. Open [http://localhost:5173](http://localhost:5173) in your browser.
 
-Podrobné informace k jednotlivým částem naleznete v komentářích zdrojových souborů. Backend je připraven pro spuštění pomocí `uvicorn` a při startu automaticky vytvoří databázové tabulky.
+## Project Structure
+- `backend/` – FastAPI application, Celery configuration, and Python business logic.
+- `frontend/` – React + Vite single-page application for interacting with eLKA Studio.
+- `scripts/` – Automation helpers for installation, updates, and development workflows.
+- `Makefile` – Unified entry point for setup, development, and maintenance tasks.
 
-## Rychlý start
+## Updating the Project
+Run `bash scripts/update.sh` (or `make setup` again) to pull the latest code and refresh dependencies. Keep your virtual environment active when working on the backend.
 
-1. `cd elka-studio`
-2. `make setup`
-3. `make run-backend`
+## Troubleshooting
+- **Redis connection errors**: Ensure Redis is available locally or via Docker. Use `make stop` to clean up the development container.
+- **Backend fails to start**: Confirm that `backend/venv` exists and that `backend/.env` contains valid configuration values.
+- **Node dependencies missing**: Re-run `npm install` inside the `frontend/` directory or execute `make setup`.
 
-API poběží na adrese `http://127.0.0.1:8000`.
-
-Pro plnohodnotný vývoj (včetně background úloh a websocketů) je nově
-k dispozici příkaz `make run-dev`, který spustí FastAPI, worker Celery a
-Redis (pokud je k dispozici Docker). Skript `scripts/run-dev.sh` se postará
-o nastavení proměnné `PYTHONPATH` i o přehledné ukončení všech procesů.
-
-Dokumentaci prosím udržujte aktuální i při dalších změnách.
-
-## Git správa projektů
-
-Backend nyní při vytváření projektu automaticky klonuje vzdálený Git repozitář
-do lokální složky (výchozí cesta je `~/.elka/projects`, lze změnit proměnnou
-`ELKA_PROJECTS_DIR`). Pokud je repozitář prázdný, inicializuje se základní
-struktura „universe_scaffold“ a první commit se odešle zpět na vzdálený
-repozitář.
-
-Citlivé údaje, jako jsou přístupové tokeny ke Git službám, jsou ukládány pouze
-šifrovaně. Před spuštěním backendu nastavte proměnnou prostředí `SECRET_KEY`
-(např. v souboru `.env`). Pro synchronizaci již vytvořeného projektu použijte
-endpoint `POST /projects/{project_id}/sync`.
-
-Proces vytvoření projektu nyní probíhá plně transakčně: pokud klonování nebo
-inicializace scaffoldu selže, databázový záznam se vrátí zpět a lokální složka
-se vyčistí, takže můžete operaci bezpečně zopakovat. Přístupový token pro Git
-se navíc nikdy neukládá do `.git/config` – při klonování i pushi se předává
-jen dočasnému helper skriptu přes proměnné prostředí.
-
-## Background úlohy a real-time aktualizace
-
-Do projektu byla integrována kombinace Celery + Redis pro spouštění
-dlouhotrvajících úloh na pozadí. Stav úloh je ukládán v databázi a
-publikován přes WebSocket endpoint `/ws/tasks/{project_id}`, takže
-frontend může reagovat na změny v reálném čase. Konfiguraci připojení k
-Redis brokeru lze upravit proměnnou prostředí `CELERY_BROKER_URL`
-(viz `.env.example`).
-
-WebSocket server nyní naslouchá Redis Pub/Sub kanálům (`project_{id}_tasks`),
-které zapojují i Celery workery běžící v oddělených procesech. Tím je zajištěno,
-že všechny aktualizace úloh se dostanou ke klientům bez ohledu na to, kde byly
-generovány.
-
-### Generační a zpracovatelský pipeline pro příběhy
-
-Celery worker nyní obsahuje kompletní dvojici úloh pro kreativní tvorbu
-i následné zpracování. Úloha `generate_story` vezme zadané "seed"
-a pomocí generátoru připraví plně strukturovaný příběh včetně
-metadata bloku. Jakmile je text hotový, vytvoří navazující úlohu
-`process_story`, která propojuje validátor a archivátora jádra eLKA.
-
-Endpoint `POST /tasks/` přijímá typy `generate_story` (parametr
-`seed`), `generate_saga` (parametry `theme` a `chapters`) a stále také
-`process_story` (parametr `story_content`). První dva typy generují
-nový obsah a automaticky zakládají navazující zpracovatelské úlohy,
-takže není nutné volat validaci/archivaci ručně.
-
-Po dohotovení jednotlivých kapitol nebo celých ság je výstup uložen do
-projektu v adresáři `lore/stories/`, následně commitnut a odeslán na
-odpovídající PR větev. Stav každé fáze je průběžně zapisován do logu
-úlohy, takže frontend i websocket klienti mají okamžitý přehled o
-postupu.
-
-#### Řízení dlouhých generačních úloh
-
-Pro dlouho běžící úlohy (např. generování ságy) jsou k dispozici nové
-endpointy `POST /tasks/{task_id}/pause` a `POST /tasks/{task_id}/resume`.
-Pauza nastaví stav úlohy na `PAUSED` a orchestrátor ságy před
-spuštěním každé kapitoly kontroluje, zda není pozastaven. Pokud ano,
-pravidelně čeká (30 s) a vyčkává na opětovné spuštění. Díky tomu lze
-dlouhé generování bezpečně pozastavit a opět rozběhnout bez zásahu do
-již rozpracovaných dat.
-
-## Frontend SPA
-
-První verze webového rozhraní je připravena ve složce `elka-studio/frontend` jako React + Vite aplikace. Pro její spuštění použijte:
-
-```bash
-cd elka-studio/frontend
-npm install
-npm run dev
-```
-
-Aplikace předpokládá běžící backend na adrese `http://localhost:8000/api`. Změnit ji lze přes proměnnou `VITE_API_BASE_URL`.
+Happy world-building!
