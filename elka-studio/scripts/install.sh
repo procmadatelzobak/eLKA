@@ -155,6 +155,13 @@ if [[ ! -f "$ENV_FILE" && -f "$ENV_EXAMPLE" ]]; then
     echo "Created backend/.env from backend/.env.example. Please review and update the configuration values."
 fi
 
+CONFIG_FILE="$PROJECT_ROOT/config.yml"
+CONFIG_EXAMPLE="$PROJECT_ROOT/config.yml.example"
+if [[ ! -f "$CONFIG_FILE" && -f "$CONFIG_EXAMPLE" ]]; then
+    cp "$CONFIG_EXAMPLE" "$CONFIG_FILE"
+    echo "Created config.yml from config.yml.example. Please review the file and customise it for your environment."
+fi
+
 if command -v openssl >/dev/null 2>&1; then
     SECRET_KEY=$(openssl rand -hex 32)
 else
@@ -165,11 +172,11 @@ PY
 )
 fi
 
-echo "Suggested SECRET_KEY value (add to backend/.env): $SECRET_KEY"
+echo "Suggested SECRET_KEY value (add to config.yml under security.secret_key): $SECRET_KEY"
 
 echo "\nInstallation complete!"
 echo "Next steps:"
-echo "  1. Update backend/.env with your secrets (e.g., SECRET_KEY above)."
+echo "  1. Update config.yml with your secrets (e.g., security.secret_key above)."
 echo "  2. Start the development stack with: make run-dev"
 echo "  3. (Optional) In another terminal start the frontend only: make run-frontend"
 
