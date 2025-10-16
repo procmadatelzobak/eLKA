@@ -39,7 +39,26 @@ const NewProjectForm = ({ onClose, onCreated }) => {
         onCreated();
       }
     } catch (apiError) {
-      const message = apiError.response?.data?.detail || 'Vytvoření projektu selhalo.';
+      const { detail } = apiError.response?.data ?? {};
+      let message = 'Vytvoření projektu selhalo.';
+
+      if (Array.isArray(detail)) {
+        message = detail
+          .map((item) => {
+            if (!item) return null;
+            if (typeof item === 'string') return item;
+            if (item.msg) {
+              const field = Array.isArray(item.loc) ? item.loc[item.loc.length - 1] : item.loc;
+              return field ? `${field}: ${item.msg}` : item.msg;
+            }
+            return JSON.stringify(item);
+          })
+          .filter(Boolean)
+          .join(' ');
+      } else if (detail) {
+        message = detail;
+      }
+
       setError(message);
     } finally {
       setIsSubmitting(false);
@@ -81,7 +100,7 @@ const NewProjectForm = ({ onClose, onCreated }) => {
               name="repository_url"
               value={formData.repository_url}
               onChange={handleChange}
-              placeholder="uzivatel/projekt"
+              placeholder="uzivatel/projekt nebo https://example.com/repo.git"
               required
             />
           </label>
@@ -94,7 +113,6 @@ const NewProjectForm = ({ onClose, onCreated }) => {
               value={formData.access_token}
               onChange={handleChange}
               placeholder="***"
-              required
             />
           </label>
 
