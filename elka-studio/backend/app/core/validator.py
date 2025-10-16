@@ -42,8 +42,18 @@ class ValidatorEngine:
         self.config = config
         self._steps: tuple[str, ...] = ("format", "continuity", "tone")
 
-    def validate(self, story_content: str) -> ValidationReport:
-        """Run all validation steps and return a structured report."""
+    def validate(
+        self,
+        story_content: str,
+        universe_files: dict[str, str] | None = None,
+    ) -> ValidationReport:
+        """Run all validation steps and return a structured report.
+
+        ``universe_files`` is accepted for future contextual validation
+        strategies. The current heuristic adapter does not require it, but we
+        keep the signature so workers can provide additional context without
+        altering their call sites later.
+        """
 
         steps: List[ValidationStep] = []
         for step_name in self._steps:

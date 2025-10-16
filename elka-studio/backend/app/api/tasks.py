@@ -30,6 +30,10 @@ class TaskCreateRequest(BaseModel):
         ge=1,
         description="Number of chapters when generating a saga",
     )
+    pr_id: int | None = Field(
+        default=None,
+        description="Optional pull request identifier for Git operations",
+    )
 
     class Config:
         allow_population_by_field_name = True
@@ -47,6 +51,8 @@ def create_task(payload: TaskCreateRequest) -> dict:
     """Create a new task and dispatch it to the background queue."""
 
     params = dict(payload.params)
+    if payload.pr_id is not None:
+        params.setdefault("pr_id", payload.pr_id)
     if payload.seed is not None:
         params.setdefault("seed", payload.seed)
     if payload.theme is not None:

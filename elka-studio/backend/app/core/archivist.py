@@ -30,8 +30,18 @@ class ArchivistEngine:
         self.ai_adapter = ai_adapter
         self.config = config
 
-    def archive(self, story_content: str) -> ArchiveResult:
-        """Return the files to be committed and relevant metadata."""
+    def archive(
+        self,
+        story_content: str,
+        universe_files: dict[str, str] | None = None,
+    ) -> ArchiveResult:
+        """Return the files to be committed and relevant metadata.
+
+        The ``universe_files`` argument is accepted to support future
+        contextual archival strategies.  The current implementation focuses on
+        the generated story alone, but Celery tasks can already provide the
+        additional information.
+        """
 
         summary = self.ai_adapter.summarise(story_content)
         slug = self._slugify(summary) or "story"
