@@ -16,6 +16,8 @@ npm run dev
 
 Aplikace se spustí na adrese [http://localhost:5173](http://localhost:5173). Backendová adresa je konfigurovatelná proměnnou prostředí `VITE_API_BASE_URL`.
 
+> 💡 **Tip:** V kořenovém adresáři projektu lze použít `make run-dev`, který kromě backendu automaticky spustí i tento Vite server (s parametrem `--host 0.0.0.0`). Pokud potřebujete jen API, použijte `make run-backend`.
+
 ## Struktura
 
 ```

@@ -15,9 +15,9 @@ eLKA Studio is a full-stack application for building and managing fictional univ
    The installer now verifies required system packages (Python, npm, Redis, etc.) and will attempt to install any
    missing dependencies automatically. Be ready to enter your administrator password if prompted.
 3. Update `backend/.env` with your secrets (use the suggested `SECRET_KEY` from the installer).
-4. Launch the stack with `make run-dev`.
-5. (Optional) In a second terminal, run `make run-frontend` for hot-reloading the UI.
-6. Open [http://localhost:5173](http://localhost:5173) in your browser.
+4. Launch the stack with `make run-dev`. The command now starts the FastAPI server, Celery worker, Redis, and the Vite frontend on [http://localhost:5173](http://localhost:5173).
+5. Need only the backend APIs? Run `make run-backend` to skip the frontend server.
+6. The UI is automatically available at [http://localhost:5173](http://localhost:5173).
 
 ## API Notes
 - When creating projects programmatically, send `name`, `git_url`, and (optionally) `git_token` in the request body to `/projects`.
