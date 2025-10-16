@@ -11,6 +11,10 @@ from celery.utils.log import get_task_logger
 
 from app.celery_app import celery_app
 from app.core.context import app_context
+from app.core.archivist import load_universe
+from app.core.extractor import _slugify, extract_fact_graph
+from app.core.planner import plan_changes
+from app.core.validator import validate_universe
 from app.db.session import SessionLocal
 from app.models.project import Project
 from app.models.task import Task, TaskStatus
@@ -109,6 +113,105 @@ def _wait_while_paused(task_db_id: int, interval_seconds: int = 30) -> None:
             interval_seconds,
         )
         time.sleep(interval_seconds)
+
+
+@celery_app.task(bind=True, name="app.tasks.lore_tasks.uce_process_story_task")
+def uce_process_story_task(
+    self,
+    task_db_id: int,
+    project_id: int,
+    story_text: str,
+    apply: bool = False,
+) -> None:
+    """Execute the Universe Consistency Engine pipeline."""
+
+    manager = TaskManager()
+    celery_task_id = self.request.id
+
+    manager.update_task_status(
+        celery_task_id,
+        TaskStatus.RUNNING,
+        progress=5,
+        log_message=f"Task {task_db_id}: starting Universe Consistency Engine run.",
+    )
+
+    try:
+        project = app_context.git_manager.get_project_from_db(project_id)
+        project_path = app_context.git_manager.resolve_project_path(project)
+        manager.update_task_status(
+            celery_task_id,
+            TaskStatus.RUNNING,
+            progress=15,
+            log_message=f"Loaded project '{project.name}'. Extracting facts...",
+        )
+
+        ai_adapter = app_context.ai_adapter
+        incoming_graph = extract_fact_graph(story_text, ai_adapter)
+        current_graph = load_universe(project_path)
+        issues = validate_universe(current_graph, incoming_graph)
+
+        for issue in issues:
+            manager.update_task_status(
+                celery_task_id,
+                TaskStatus.RUNNING,
+                progress=35,
+                log_message=f"UCE {issue.level.upper()} {issue.code}: {issue.message}",
+            )
+
+        if any(issue.level == "error" for issue in issues):
+            manager.update_task_status(
+                celery_task_id,
+                TaskStatus.FAILURE,
+                progress=40,
+                log_message="UCE detected blocking inconsistencies; aborting run.",
+            )
+            return
+
+        changeset = plan_changes(current_graph, incoming_graph, project_path)
+        if not changeset.files:
+            manager.update_task_status(
+                celery_task_id,
+                TaskStatus.SUCCESS,
+                progress=60,
+                log_message="UCE completed: no changes required.",
+            )
+            return
+
+        diff_preview = "\n".join(
+            f"{file.path}: {'update' if file.old else 'create'}" for file in changeset.files
+        )
+
+        if not apply:
+            manager.update_task_status(
+                celery_task_id,
+                TaskStatus.SUCCESS,
+                progress=80,
+                log_message=f"UCE dry-run diff preview:\n{diff_preview}",
+            )
+            return
+
+        git_adapter = app_context.create_git_adapter(project)
+        branch_name = f"uce/{_slugify(project.name)}"
+        git_adapter.create_branch(branch_name)
+        git_adapter.apply_changeset(changeset)
+        commit_sha = git_adapter.commit_all(
+            f"Add UCE changes for {project.name}",
+        )
+
+        manager.update_task_status(
+            celery_task_id,
+            TaskStatus.SUCCESS,
+            progress=100,
+            log_message=f"UCE applied changes on {branch_name}, commit {commit_sha}",
+        )
+    except Exception as exc:  # pragma: no cover - defensive logging
+        logger.exception("uce_process_story_task failed: %s", exc)
+        manager.update_task_status(
+            celery_task_id,
+            TaskStatus.FAILURE,
+            log_message=f"Task {task_db_id} failed: {exc}",
+        )
+        raise
 
 
 @celery_app.task(bind=True, name="app.tasks.lore_tasks.process_story_task")

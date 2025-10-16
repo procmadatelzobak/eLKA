@@ -8,6 +8,7 @@ from typing import Iterable, List
 from app.adapters.ai.base import BaseAIAdapter
 from app.utils.config import Config
 
+from .schemas import ConsistencyIssue, FactGraph
 
 @dataclass(slots=True)
 class ValidationStep:
@@ -70,4 +71,37 @@ class ValidatorEngine:
         return normalised or ["No issues detected."]
 
 
-__all__ = ["ValidationStep", "ValidationReport", "ValidatorEngine"]
+def validate_universe(current: FactGraph, incoming: FactGraph) -> List[ConsistencyIssue]:
+    """Compare two fact graphs and emit consistency issues."""
+
+    issues: List[ConsistencyIssue] = []
+    current_entities = {entity.id: entity for entity in current.entities}
+
+    for entity in incoming.entities:
+        existing = current_entities.get(entity.id)
+        if existing and entity.type != existing.type:
+            issues.append(
+                ConsistencyIssue(
+                    level="error",
+                    code="entity_type_conflict",
+                    message=(
+                        f"Entity {entity.id} type mismatch: incoming={entity.type} "
+                        f"current={existing.type}"
+                    ),
+                    refs=[entity.id],
+                )
+            )
+        elif not existing:
+            issues.append(
+                ConsistencyIssue(
+                    level="info",
+                    code="new_entity",
+                    message=f"Entity {entity.id} is new to the universe.",
+                    refs=[entity.id],
+                )
+            )
+
+    return issues
+
+
+__all__ = ["ValidationStep", "ValidationReport", "ValidatorEngine", "validate_universe"]

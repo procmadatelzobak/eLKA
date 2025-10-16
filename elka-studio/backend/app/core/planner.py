@@ -1,0 +1,33 @@
+"""Planner responsible for proposing deterministic repository changes."""
+
+from __future__ import annotations
+
+from pathlib import Path
+
+from .schemas import Changeset, ChangesetFile, FactGraph
+
+
+def plan_changes(current: FactGraph, incoming: FactGraph, repo_path: Path) -> Changeset:
+    """Generate a deterministic changeset for the provided fact graph."""
+
+    files: list[ChangesetFile] = []
+    for entity in incoming.entities:
+        target = repo_path / "Objekty" / f"{entity.id}.md"
+        old_content = target.read_text(encoding="utf-8") if target.exists() else None
+        if old_content:
+            new_content = f"{old_content.rstrip()}\n\n## Update\n{entity.summary or ''}\n"
+        else:
+            new_content = f"# {entity.id}\n{(entity.summary or '').strip()}\n"
+        files.append(
+            ChangesetFile(
+                path=str(target.relative_to(repo_path)),
+                old=old_content,
+                new=new_content,
+            )
+        )
+
+    summary = f"Planned updates for {len(files)} universe file(s)."
+    return Changeset(files=files, summary=summary)
+
+
+__all__ = ["plan_changes"]

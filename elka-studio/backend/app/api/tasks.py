@@ -128,9 +128,32 @@ def resume_task(task_id: int, session: Session = Depends(get_session)) -> dict:
     return task.to_dict()
 
 
+class ProcessStoryRequest(BaseModel):
+    """Payload for invoking the Universe Consistency Engine."""
+
+    project_id: int
+    story_text: str = Field(..., min_length=1)
+    apply: bool = False
+
+
+@router.post("/story/process", summary="Run Universe Consistency Engine")
+def process_story(payload: ProcessStoryRequest) -> dict:
+    story_text = payload.story_text.strip()
+    if not story_text:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="story_text must be a non-empty string",
+        )
+
+    params = {"story_text": story_text, "apply": payload.apply}
+    task = task_manager.create_task(payload.project_id, "uce_process_story", params)
+    return {"task_id": task.id, "celery_task_id": task.celery_task_id}
+
+
 __all__ = [
     "create_task",
     "list_tasks",
     "pause_task",
     "resume_task",
+    "process_story",
 ]

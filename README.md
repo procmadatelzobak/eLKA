@@ -7,6 +7,7 @@ eLKA Studio is a full-stack application for building and managing fictional univ
 - **Real-time task queue** – Monitor Celery jobs through Redis-backed WebSockets for immediate progress updates.
 - **Story & saga generation** – Launch AI-assisted generation pipelines for single stories or multi-chapter sagas.
 - **Automated lore processing** – Validate, archive, and version generated content with Git integration.
+- **Universe Consistency Engine** – Extract facts, verify canon conflicts, and propose Git-ready updates.
 - **Extensible architecture** – Modular backend services and a modern React frontend designed for customization.
 
 ## Quick Start
@@ -40,6 +41,7 @@ eLKA Studio is a full-stack application for building and managing fictional univ
 - The backend root endpoint (`/api/`) now returns a short status payload confirming the API is reachable and linking to the interactive documentation at `/docs`.
 - Existing clients should be updated to use the new field names to avoid validation errors.
 - Manual story submissions must send the text inside the `params.story_content` field when calling `POST /api/tasks/`. The dashboard form handles this automatically, but custom integrations should update their payloads to avoid `story_content must be a non-empty string` errors.
+- The Universe Consistency Engine is available via `POST /api/tasks/story/process` with `project_id`, `story_text`, and optional `apply` flag. Dry-run responses report the planned diff; apply mode writes commits on a dedicated `uce/<project>` branch.
 - When a project stores an encrypted Git token, Celery tasks now decrypt it and use a credential helper during `git push`, preventing repeated interactive GitHub login prompts during story processing or saga generation.
 - Celery workers now share a singleton application context (`backend/app/core/context.py`) that bootstraps configuration, AI adapters, Git helpers, and validation/archival services once per worker. Task payloads must include the `project_id` (and optionally `pr_id`) so the worker can retrieve the correct repository without reopening the FastAPI stack for every job.
 

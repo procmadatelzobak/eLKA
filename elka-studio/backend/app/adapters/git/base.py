@@ -52,6 +52,31 @@ class GitAdapter:
             written.append(destination)
         return written
 
+    def create_branch(self, branch: str, repo_path: Path | None = None) -> None:
+        """Ensure the target branch exists and is checked out."""
+
+        repository = git.Repo(repo_path) if repo_path else self.repo
+        branch_names = {head.name for head in repository.branches}
+        if branch in branch_names:
+            repository.git.checkout(branch)
+        else:
+            repository.git.checkout("-b", branch)
+
+    def apply_changeset(self, changeset) -> None:
+        """Write all files contained in the provided changeset."""
+
+        for file in changeset.files:
+            destination = self.project_path / file.path
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            destination.write_text(file.new, encoding="utf-8")
+
+    def commit_all(self, message: str, author=None) -> str:
+        """Commit all staged and unstaged changes and return the commit SHA."""
+
+        self.repo.git.add(A=True)
+        commit = self.repo.index.commit(message, author=author)
+        return commit.hexsha
+
     def _current_branch(self) -> str:
         try:
             return self.repo.active_branch.name
