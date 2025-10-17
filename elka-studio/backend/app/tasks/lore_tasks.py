@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import difflib
 import json
 import time
 from datetime import datetime
@@ -9,6 +10,7 @@ from textwrap import dedent
 
 from celery.utils.log import get_task_logger
 
+from app.adapters.ai.base import get_ai_adapters
 from app.celery_app import celery_app
 from app.core.context import app_context
 from app.core.archivist import load_universe
@@ -145,11 +147,10 @@ def uce_process_story_task(
             log_message=f"Loaded project '{project.name}'. Extracting facts...",
         )
 
-        validator_ai = app_context.validator_ai
-        writer_ai = app_context.writer_ai
+        validator_ai, writer_ai = get_ai_adapters(app_context.config)
         incoming_graph = extract_fact_graph(story_text, validator_ai)
         current_graph = load_universe(project_path)
-        issues = validate_universe(current_graph, incoming_graph)
+        issues = validate_universe(current_graph, incoming_graph, validator_ai)
 
         for issue in issues:
             manager.update_task_status(
@@ -178,32 +179,57 @@ def uce_process_story_task(
             )
             return
 
-        diff_preview = "\n".join(
-            f"{file.path}: {'update' if file.old else 'create'}" for file in changeset.files
-        )
+        diff_preview = []
+        for file in changeset.files:
+            old_lines = (file.old or "").splitlines(keepends=True)
+            new_lines = file.new.splitlines(keepends=True)
+            diff = "".join(
+                difflib.unified_diff(
+                    old_lines,
+                    new_lines,
+                    fromfile=f"a/{file.path}",
+                    tofile=f"b/{file.path}",
+                    lineterm="",
+                )
+            )
+            diff_preview.append(diff or f"# No diff for {file.path}")
+        diff_preview_text = "\n".join(diff_preview)
 
         if not apply:
             manager.update_task_status(
                 celery_task_id,
                 TaskStatus.SUCCESS,
                 progress=80,
-                log_message=f"UCE dry-run diff preview:\n{diff_preview}",
+                log_message="UCE dry-run completed.",
+                result={
+                    "diff": diff_preview_text,
+                    "summary": changeset.summary,
+                    "files": [file.path for file in changeset.files],
+                },
             )
             return
 
         git_adapter = app_context.create_git_adapter(project)
-        branch_name = f"uce/{_slugify(project.name)}"
+        timestamp = datetime.utcnow().strftime("%Y%m%d%H%M%S")
+        branch_slug = _slugify(story_text.splitlines()[0] if story_text else project.name)
+        branch_name = f"uce/{timestamp}-{branch_slug[:40]}" if branch_slug else f"uce/{timestamp}"
         git_adapter.create_branch(branch_name)
         git_adapter.apply_changeset(changeset)
         commit_sha = git_adapter.commit_all(
             f"Add UCE changes for {project.name}",
         )
+        git_adapter.push_branch(branch_name)
 
         manager.update_task_status(
             celery_task_id,
             TaskStatus.SUCCESS,
             progress=100,
             log_message=f"UCE applied changes on {branch_name}, commit {commit_sha}",
+            result={
+                "branch": branch_name,
+                "commit": commit_sha,
+                "summary": changeset.summary,
+            },
         )
     except Exception as exc:  # pragma: no cover - defensive logging
         logger.exception("uce_process_story_task failed: %s", exc)

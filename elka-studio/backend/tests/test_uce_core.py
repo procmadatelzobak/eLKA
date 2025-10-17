@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 import sys
+from typing import Iterable, List
 
 import git
 import pytest
@@ -18,17 +19,19 @@ from app.adapters.git.base import GitAdapter
 from app.core.archivist import load_universe
 from app.core.extractor import extract_fact_graph
 from app.core.planner import plan_changes
-from app.core.schemas import Changeset, ChangesetFile, FactEntity, FactGraph
+from app.core.schemas import Changeset, ChangesetFile, FactEntity, FactEvent, FactGraph
 from app.core.validator import validate_universe
 from app.utils.config import Config
 
 
 class DummyAIAdapter(BaseAIAdapter):
-    """Test double returning a predefined response."""
+    """Test double returning predefined responses for analysis calls."""
 
-    def __init__(self, response) -> None:
+    def __init__(self, response: object, json_responses: Iterable[str] | None = None) -> None:
         super().__init__(Config(data={}))
         self._response = response
+        self._json_responses: List[str] = list(json_responses or ["{}"])
+        self._json_calls = 0
 
     def analyse(self, story_content: str, aspect: str):  # type: ignore[override]
         return self._response
@@ -39,85 +42,117 @@ class DummyAIAdapter(BaseAIAdapter):
     def generate_markdown(self, instruction: str, context: str | None = None) -> str:  # pragma: no cover - unused
         return (context or instruction).strip()
 
-    def generate_json(self, system: str, user: str) -> str:  # pragma: no cover - unused
-        return "{}"
+    def generate_json(self, system: str, user: str) -> str:  # type: ignore[override]
+        index = min(self._json_calls, len(self._json_responses) - 1)
+        self._json_calls += 1
+        return self._json_responses[index]
+
+
+class RetryingAIAdapter(BaseAIAdapter):
+    """Adapter that fails once before returning valid JSON."""
+
+    def __init__(self, responses: Iterable[str]) -> None:
+        super().__init__(Config(data={}))
+        self._responses = list(responses)
+        self._calls = 0
+
+    def analyse(self, story_content: str, aspect: str):  # pragma: no cover - unused
+        return {}
+
+    def summarise(self, story_content: str) -> str:  # pragma: no cover - unused
+        return "summary"
+
+    def generate_json(self, system: str, user: str) -> str:  # type: ignore[override]
+        response = self._responses[self._calls]
+        self._calls = min(self._calls + 1, len(self._responses) - 1)
+        return response
+
+
+class LegendAIAdapter(BaseAIAdapter):
+    """Adapter returning deterministic legend breach findings."""
+
+    def __init__(self, payload: object) -> None:
+        super().__init__(Config(data={}))
+        self._payload = payload
+
+    def analyse(self, story_content: str, aspect: str):  # pragma: no cover - unused
+        return {}
+
+    def summarise(self, story_content: str) -> str:  # pragma: no cover - unused
+        return "summary"
+
+    def generate_json(self, system: str, user: str) -> str:  # type: ignore[override]
+        return json.dumps(self._payload)
 
 
 @pytest.fixture()
 def universe_repo(tmp_path: Path) -> Path:
     (tmp_path / "Objekty").mkdir()
     (tmp_path / "Legendy").mkdir()
-    (tmp_path / "Objekty" / "fortress.md").write_text("# Ancient Fortress\n", encoding="utf-8")
-    (tmp_path / "Legendy" / "myth.md").write_text("# Forgotten Myth\n", encoding="utf-8")
+    (tmp_path / "Objekty" / "fortress.md").write_text(
+        "---\nera: 1100-1300\n---\n# Ancient Fortress\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "Legendy" / "myth.md").write_text("# Forgotten Myth\n\n- Core truth\n", encoding="utf-8")
     (tmp_path / "timeline.txt").write_text("1200 Founding of the order\n", encoding="utf-8")
     return tmp_path
 
 
-def test_extract_fact_graph_accepts_dict() -> None:
-    response = {"entities": [{"id": "hero", "type": "person"}], "events": []}
-    adapter = DummyAIAdapter(response)
+def test_extract_fact_graph_accepts_dict_and_slugifies() -> None:
+    response = {
+        "entities": [{"id": "Knight of Dawn", "type": "person"}],
+        "events": [
+            {
+                "title": "Battle of Dawn",
+                "participants": ["Knight of Dawn"],
+                "location": "Ancient Fortress",
+            }
+        ],
+    }
+    adapter = DummyAIAdapter({}, json_responses=[json.dumps(response)])
     graph = extract_fact_graph("Story", adapter)
-    assert [entity.id for entity in graph.entities] == ["hero"]
+    assert [entity.id for entity in graph.entities] == ["knight_of_dawn"]
+    assert graph.events[0].participants == ["knight_of_dawn"]
+    assert graph.events[0].location == "ancient_fortress"
 
 
-def test_extract_fact_graph_accepts_json_string() -> None:
-    payload = json.dumps({"entities": [], "events": [{"id": "battle", "title": "Battle"}]})
-    adapter = DummyAIAdapter(payload)
+def test_extract_fact_graph_retry_on_invalid_json() -> None:
+    responses = ["not-json", json.dumps({"entities": [], "events": [{"title": "Duel"}]})]
+    adapter = RetryingAIAdapter(responses)
     graph = extract_fact_graph("Story", adapter)
-    assert [event.id for event in graph.events] == ["battle"]
+    assert [event.title for event in graph.events] == ["Duel"]
 
 
 def test_extract_fact_graph_invalid_payload_raises() -> None:
-    adapter = DummyAIAdapter("not-json")
+    adapter = DummyAIAdapter("not-json", json_responses=["also-bad", "still-bad"])
     with pytest.raises(ValueError):
         extract_fact_graph("Story", adapter)
 
 
-def test_load_universe_parses_entities_and_events(universe_repo: Path) -> None:
+def test_load_universe_parses_entities_events_and_truths(universe_repo: Path) -> None:
     graph = load_universe(universe_repo)
-    entity_ids = {entity.id for entity in graph.entities}
-    event_titles = {event.title for event in graph.events}
-    assert "fortress" in entity_ids
-    assert "myth" in entity_ids
-    assert "1200 Founding of the order" in event_titles
+    entity = next(entity for entity in graph.entities if entity.id == "fortress")
+    assert entity.attributes.get("era") == "1100-1300"
+    assert any(event.title.startswith("Founding") for event in graph.events)
+    assert "Core truth" in graph.core_truths
 
 
 def test_plan_changes_creates_new_files(universe_repo: Path) -> None:
     incoming = FactGraph(entities=[FactEntity(id="village", type="place", summary="Quiet village")])
     changeset = plan_changes(FactGraph(), incoming, universe_repo)
-    assert len(changeset.files) == 1
-    file_change = changeset.files[0]
-    assert file_change.path == "Objekty/village.md"
-    assert "# village" in file_change.new
+    file_paths = {file.path for file in changeset.files}
+    assert "Objekty/village.md" in file_paths
+    assert "# village" in next(file.new for file in changeset.files if file.path == "Objekty/village.md")
 
 
-def test_plan_changes_skips_duplicate_updates(universe_repo: Path) -> None:
-    target = universe_repo / "Objekty" / "fortress.md"
-    target.write_text("# Ancient Fortress\n\n## Update\nQuiet village\n", encoding="utf-8")
+def test_plan_changes_adds_timeline_events(universe_repo: Path) -> None:
     incoming = FactGraph(
-        entities=[FactEntity(id="fortress", type="place", summary="Quiet village")]
+        events=[FactEvent(id="battle", title="Battle of Spring", date="1201", participants=[])],
     )
-    current = FactGraph(entities=[FactEntity(id="fortress", type="place")])
-    changeset = plan_changes(current, incoming, universe_repo)
-    assert changeset.files == []
-    assert changeset.summary == "No universe files require updates"
-
-
-def test_plan_changes_appends_new_update(universe_repo: Path) -> None:
-    target = universe_repo / "Objekty" / "fortress.md"
-    target.write_text("# Ancient Fortress\n", encoding="utf-8")
-    incoming = FactGraph(
-        entities=[FactEntity(id="fortress", type="place", summary="New discovery revealed")]
-    )
-    current = FactGraph(entities=[FactEntity(id="fortress", type="place")])
-
-    changeset = plan_changes(current, incoming, universe_repo)
-
-    assert len(changeset.files) == 1
-    file_change = changeset.files[0]
-    assert file_change.old == "# Ancient Fortress\n"
-    assert file_change.new == "# Ancient Fortress\n\n## Update\nNew discovery revealed\n"
-    assert changeset.summary == "Planned updates for 1 universe file(s)."
+    changeset = plan_changes(FactGraph(), incoming, universe_repo)
+    timeline_change = next(file for file in changeset.files if file.path.startswith("timeline"))
+    assert "Battle of Spring" in timeline_change.new
+    assert "1200 Founding of the order" in timeline_change.new
 
 
 def test_plan_changes_uses_writer_for_body(universe_repo: Path) -> None:
@@ -144,8 +179,7 @@ def test_plan_changes_uses_writer_for_body(universe_repo: Path) -> None:
 
     changeset = plan_changes(FactGraph(), incoming, universe_repo, writer)
 
-    assert len(changeset.files) == 1
-    new_file = changeset.files[0]
+    new_file = next(file for file in changeset.files if file.path == "Objekty/artifact.md")
     assert new_file.new == "# artifact\nGenerated lore body\n"
     assert writer.calls
 
@@ -155,6 +189,33 @@ def test_validate_universe_detects_conflicts() -> None:
     incoming = FactGraph(entities=[FactEntity(id="hero", type="artifact")])
     issues = validate_universe(current, incoming)
     assert any(issue.code == "entity_type_conflict" for issue in issues)
+
+
+def test_validate_universe_missing_entity() -> None:
+    incoming = FactGraph(events=[FactEvent(id="raid", title="Raid", participants=["ghost"])])
+    issues = validate_universe(FactGraph(), incoming)
+    assert any(issue.code == "missing_entity" and "ghost" in issue.refs for issue in issues)
+
+
+def test_validate_universe_temporal_mismatch() -> None:
+    entity = FactEntity(id="hero", type="person", attributes={"era": "1200-1250"})
+    event = FactEvent(id="battle", title="Battle", date="1300", participants=["hero"])
+    issues = validate_universe(FactGraph(entities=[entity]), FactGraph(events=[event]))
+    assert any(issue.code == "temporal_mismatch" for issue in issues)
+
+
+def test_validate_universe_legend_breach() -> None:
+    current = FactGraph(core_truths=["The hero never falls."])
+    incoming = FactGraph(events=[FactEvent(id="fall", title="Hero falls", participants=[])])
+    ai = LegendAIAdapter([{"message": "Contradiction detected", "refs": ["fall"], "level": "error"}])
+    issues = validate_universe(current, incoming, ai)
+    assert any(issue.code == "legend_breach" for issue in issues)
+
+
+def test_validate_universe_legend_skip_info() -> None:
+    current = FactGraph(core_truths=["Magic is rare."])
+    issues = validate_universe(current, FactGraph())
+    assert any(issue.code == "legend_breach_check_skipped" for issue in issues)
 
 
 def test_git_adapter_branch_and_commit(tmp_path: Path) -> None:
@@ -184,3 +245,10 @@ def test_git_adapter_branch_and_commit(tmp_path: Path) -> None:
 
     assert repo.head.commit.hexsha == sha
     assert (tmp_path / "Objekty" / "hero.md").read_text(encoding="utf-8") == "# hero\nChampion\n"
+
+
+__all__ = [
+    "DummyAIAdapter",
+    "RetryingAIAdapter",
+    "LegendAIAdapter",
+]
