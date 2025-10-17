@@ -97,6 +97,23 @@ def test_plan_changes_skips_duplicate_updates(universe_repo: Path) -> None:
     assert changeset.summary == "No universe files require updates"
 
 
+def test_plan_changes_appends_new_update(universe_repo: Path) -> None:
+    target = universe_repo / "Objekty" / "fortress.md"
+    target.write_text("# Ancient Fortress\n", encoding="utf-8")
+    incoming = FactGraph(
+        entities=[FactEntity(id="fortress", type="place", summary="New discovery revealed")]
+    )
+    current = FactGraph(entities=[FactEntity(id="fortress", type="place")])
+
+    changeset = plan_changes(current, incoming, universe_repo)
+
+    assert len(changeset.files) == 1
+    file_change = changeset.files[0]
+    assert file_change.old == "# Ancient Fortress\n"
+    assert file_change.new == "# Ancient Fortress\n\n## Update\nNew discovery revealed\n"
+    assert changeset.summary == "Planned updates for 1 universe file(s)."
+
+
 def test_validate_universe_detects_conflicts() -> None:
     current = FactGraph(entities=[FactEntity(id="hero", type="person")])
     incoming = FactGraph(entities=[FactEntity(id="hero", type="artifact")])
