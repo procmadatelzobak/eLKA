@@ -175,7 +175,13 @@ def uce_process_story_task(
                 celery_task_id,
                 TaskStatus.SUCCESS,
                 progress=60,
-                log_message="UCE completed: no changes required.",
+                log_message="UCE no-op: universe already up-to-date.",
+                result={
+                    "diff_preview": "",
+                    "summary": changeset.summary,
+                    "files": [],
+                    "notes": ["no-op: universe already up-to-date"],
+                },
             )
             return
 
@@ -202,17 +208,20 @@ def uce_process_story_task(
                 progress=80,
                 log_message="UCE dry-run completed.",
                 result={
-                    "diff": diff_preview_text,
+                    "diff_preview": diff_preview_text,
                     "summary": changeset.summary,
                     "files": [file.path for file in changeset.files],
+                    "mode": "dry-run",
                 },
             )
             return
 
         git_adapter = app_context.create_git_adapter(project)
-        timestamp = datetime.utcnow().strftime("%Y%m%d%H%M%S")
+        timestamp = datetime.utcnow().strftime("%Y%m%d%H%M")
+        project_slug = _slugify(project.name or "project")
         branch_slug = _slugify(story_text.splitlines()[0] if story_text else project.name)
-        branch_name = f"uce/{timestamp}-{branch_slug[:40]}" if branch_slug else f"uce/{timestamp}"
+        branch_identifier = branch_slug or project_slug or "run"
+        branch_name = f"uce/{timestamp}-{branch_identifier[:40]}"
         git_adapter.create_branch(branch_name)
         git_adapter.apply_changeset(changeset)
         commit_sha = git_adapter.commit_all(
@@ -227,8 +236,11 @@ def uce_process_story_task(
             log_message=f"UCE applied changes on {branch_name}, commit {commit_sha}",
             result={
                 "branch": branch_name,
-                "commit": commit_sha,
+                "commit_sha": commit_sha,
+                "diff_preview": diff_preview_text,
                 "summary": changeset.summary,
+                "files": [file.path for file in changeset.files],
+                "mode": "apply",
             },
         )
     except Exception as exc:  # pragma: no cover - defensive logging

@@ -59,26 +59,36 @@ def _normalise_events(raw_events: Iterable[Dict[str, Any]]) -> list[Dict[str, An
     return normalised
 
 
+STRICT_FACT_GRAPH_TEMPLATE = """
+You are the Universe Consistency Extractor. Reply with JSON **only**.
+Return an object with exactly two keys: "entities" and "events".
+- "entities": array of objects with keys {"id", "type", "labels", "summary", "attributes"}.
+- "events": array of objects with keys {"id", "title", "date", "location", "participants", "description"}.
+Match the field names exactly. Use slug-style identifiers (lowercase, underscore).
+Do not include markdown, code fences, explanations, or trailing text.
+Story follows between <story> markers.
+""".strip()
+
+
 def _build_request_payload(story: str) -> str:
     return (
-        "Extract entities and events from the following story. "
-        "Return STRICT JSON that matches this schema: "
-        "{\"entities\": [FactEntity], \"events\": [FactEvent]}. "
-        "Use slug-like identifiers. No prose, no markdown.\n\nSTORY:\n"
-        + story
+        STRICT_FACT_GRAPH_TEMPLATE
+        + "\n<story>\n"
+        + story.strip()
+        + "\n</story>"
     )
 
 
 def extract_fact_graph(story: str, ai: BaseAIAdapter) -> FactGraph:
     """Use the AI adapter to convert a story into a :class:`FactGraph`."""
 
-    prompts = [
-        _build_request_payload(story),
-        "ONLY JSON. No prose.\n" + _build_request_payload(story),
-    ]
+    base_prompt = _build_request_payload(story)
+    prompts = [base_prompt]
 
     last_error: Exception | None = None
-    for prompt in prompts:
+    retry_prompt_used = False
+    while prompts:
+        prompt = prompts.pop(0)
         result: Any
         if hasattr(ai, "generate_json"):
             system_prompt = (
@@ -104,8 +114,17 @@ def extract_fact_graph(story: str, ai: BaseAIAdapter) -> FactGraph:
             events = _normalise_events(data.get("events", []))
             graph = FactGraph(entities=entities, events=events)
             return graph
-        except (json.JSONDecodeError, ValidationError, TypeError, ValueError) as exc:
+        except ValidationError as exc:
             last_error = exc
+            if not retry_prompt_used:
+                retry_prompt_used = True
+                prompts.append("Return ONLY JSON.\n" + base_prompt)
+            continue
+        except (json.JSONDecodeError, TypeError, ValueError) as exc:
+            last_error = exc
+            if not retry_prompt_used:
+                retry_prompt_used = True
+                prompts.append("Return ONLY JSON.\n" + base_prompt)
             continue
 
     raise ValueError(f"Extractor failed to return valid JSON: {last_error}")

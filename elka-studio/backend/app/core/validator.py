@@ -5,12 +5,15 @@ from __future__ import annotations
 import json
 import re
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Iterable, List, Optional, Set
 
 from app.adapters.ai.base import BaseAIAdapter
 from app.utils.config import Config
 
 from .schemas import ConsistencyIssue, FactEntity, FactEvent, FactGraph
+
+TEMPLATES_ROOT = Path(__file__).resolve().parent.parent / "templates" / "universe_scaffold"
 
 @dataclass(slots=True)
 class ValidationStep:
@@ -118,9 +121,10 @@ def validate_universe(
         )
     )
 
+    canonical_truths = _load_canonical_truths(current.core_truths)
     issues.extend(
         _validate_legend_breaches(
-            current.core_truths,
+            canonical_truths,
             incoming.entities,
             incoming.events,
             ai,
@@ -200,7 +204,7 @@ def _validate_legend_breaches(
     events: Iterable[FactEvent],
     ai: Optional[BaseAIAdapter],
 ) -> List[ConsistencyIssue]:
-    canonical_truths = [truth.strip() for truth in truths if truth.strip()]
+    canonical_truths = [truth.strip() for truth in truths if truth and truth.strip()]
     if not canonical_truths:
         return []
 
@@ -265,6 +269,39 @@ def _validate_legend_breaches(
             )
         )
     return issues
+
+
+def _load_canonical_truths(existing: Iterable[str]) -> List[str]:
+    """Return ordered canonical truths including static templates."""
+
+    truths = [truth.strip() for truth in existing if truth and truth.strip()]
+
+    template_truths_path = TEMPLATES_ROOT / "Legends" / "CORE_TRUTHS.md"
+    if template_truths_path.is_file():
+        try:
+            for line in template_truths_path.read_text(encoding="utf-8").splitlines():
+                cleaned = line.strip()
+                if not cleaned or cleaned.startswith("#"):
+                    continue
+                if cleaned.startswith("- ") or cleaned.startswith("* "):
+                    truths.append(cleaned[2:].strip())
+                    continue
+                if re.match(r"^\d+[.)]\s+", cleaned):
+                    value = re.sub(r"^\d+[.)]\s+", "", cleaned).strip()
+                    if value:
+                        truths.append(value)
+        except OSError:  # pragma: no cover - filesystem edge
+            pass
+
+    # Preserve order but deduplicate deterministically.
+    seen: Set[str] = set()
+    ordered_truths: List[str] = []
+    for truth in truths:
+        if truth not in seen:
+            seen.add(truth)
+            ordered_truths.append(truth)
+
+    return ordered_truths
 
 
 def _extract_year(date_text: Optional[str]) -> Optional[int]:

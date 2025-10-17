@@ -131,20 +131,41 @@ def resume_task(task_id: int, session: Session = Depends(get_session)) -> dict:
 class ProcessStoryRequest(BaseModel):
     """Payload for invoking the Universe Consistency Engine.
 
-    When the AI provider is configured for Gemini, story analysis and
-    validation use ``AI_VALIDATOR_MODEL`` (Gemini 2.5 Pro by default)
-    while Markdown output is rendered through ``AI_WRITER_MODEL``
-    (Gemini 2.5 Flash). Missing credentials automatically fall back to
-    deterministic heuristics.
+    ``apply`` toggles between dry-run (default) and applying the resulting
+    changeset to a dedicated ``uce/YYYYmmddHHMM-<slug>`` branch. Dry-runs
+    persist the diff preview in the task record without modifying the
+    repository.
     """
 
-    project_id: int
-    story_text: str = Field(..., min_length=1)
-    apply: bool = False
+    project_id: int = Field(..., description="Identifier of the project to process")
+    story_text: str = Field(
+        ..., min_length=1, description="Story text analysed for consistency"
+    )
+    apply: bool = Field(
+        default=False,
+        description="When true the changeset is committed and pushed; otherwise only a diff preview is stored.",
+    )
 
 
-@router.post("/story/process", summary="Run Universe Consistency Engine")
-def process_story(payload: ProcessStoryRequest) -> dict:
+class ProcessStoryResponse(BaseModel):
+    """Response metadata for a scheduled Universe Consistency Engine run."""
+
+    task_id: int = Field(..., description="Identifier of the persisted task record")
+    celery_task_id: str = Field(..., description="Celery identifier for progress tracking")
+
+
+@router.post(
+    "/story/process",
+    summary="Run Universe Consistency Engine",
+    response_model=ProcessStoryResponse,
+    description=(
+        "Start a Universe Consistency Engine run for the provided story. "
+        "Dry-runs capture the unified diff in `result.diff_preview` while apply runs create "
+        "a `uce/<timestamp>-<slug>` branch, push it via the configured Git adapter, and persist the `commit_sha`. "
+        "Any validation errors are surfaced through the task log and stored notes."
+    ),
+)
+def process_story(payload: ProcessStoryRequest) -> ProcessStoryResponse:
     story_text = payload.story_text.strip()
     if not story_text:
         raise HTTPException(
@@ -154,7 +175,7 @@ def process_story(payload: ProcessStoryRequest) -> dict:
 
     params = {"story_text": story_text, "apply": payload.apply}
     task = task_manager.create_task(payload.project_id, "uce_process_story", params)
-    return {"task_id": task.id, "celery_task_id": task.celery_task_id}
+    return ProcessStoryResponse(task_id=task.id, celery_task_id=task.celery_task_id)
 
 
 __all__ = [

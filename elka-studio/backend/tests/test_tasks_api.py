@@ -72,3 +72,23 @@ def test_task_serialization_includes_payload() -> None:
     assert payload["params"] == {"seed": "tajemná knihovna"}
     assert payload["result"]["story"].startswith("Byl jednou")
     assert "Lore/story.md" in payload["result"]["files"]
+
+
+def test_process_story_response_masks_tokens(monkeypatch: pytest.MonkeyPatch) -> None:
+    """process_story never exposes configured Gemini credentials."""
+
+    monkeypatch.setenv("GEMINI_API_KEY", "super-secret-token")
+
+    class DummyTaskRecord:
+        id = 42
+        celery_task_id = "abc123"
+
+    def fake_create_task(project_id: int, task_type: str, params: dict) -> DummyTaskRecord:
+        assert "super-secret-token" not in str(params)
+        return DummyTaskRecord()
+
+    monkeypatch.setattr(tasks, "task_manager", type("DummyManager", (), {"create_task": staticmethod(fake_create_task)})())
+
+    payload = tasks.ProcessStoryRequest(project_id=1, story_text="Legend", apply=False)
+    response = tasks.process_story(payload)
+    assert response.dict() == {"task_id": 42, "celery_task_id": "abc123"}
