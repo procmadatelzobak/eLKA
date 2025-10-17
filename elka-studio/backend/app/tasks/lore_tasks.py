@@ -145,8 +145,9 @@ def uce_process_story_task(
             log_message=f"Loaded project '{project.name}'. Extracting facts...",
         )
 
-        ai_adapter = app_context.ai_adapter
-        incoming_graph = extract_fact_graph(story_text, ai_adapter)
+        validator_ai = app_context.validator_ai
+        writer_ai = app_context.writer_ai
+        incoming_graph = extract_fact_graph(story_text, validator_ai)
         current_graph = load_universe(project_path)
         issues = validate_universe(current_graph, incoming_graph)
 
@@ -167,7 +168,7 @@ def uce_process_story_task(
             )
             return
 
-        changeset = plan_changes(current_graph, incoming_graph, project_path)
+        changeset = plan_changes(current_graph, incoming_graph, project_path, writer_ai)
         if not changeset.files:
             manager.update_task_status(
                 celery_task_id,
