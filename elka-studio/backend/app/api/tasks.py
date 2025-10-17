@@ -129,7 +129,14 @@ def resume_task(task_id: int, session: Session = Depends(get_session)) -> dict:
 
 
 class ProcessStoryRequest(BaseModel):
-    """Payload for invoking the Universe Consistency Engine."""
+    """Payload for invoking the Universe Consistency Engine.
+
+    When the AI provider is configured for Gemini, story analysis and
+    validation use ``AI_VALIDATOR_MODEL`` (Gemini 2.5 Pro by default)
+    while Markdown output is rendered through ``AI_WRITER_MODEL``
+    (Gemini 2.5 Flash). Missing credentials automatically fall back to
+    deterministic heuristics.
+    """
 
     project_id: int
     story_text: str = Field(..., min_length=1)

@@ -37,6 +37,24 @@ eLKA Studio is a full-stack application for building and managing fictional univ
   modelu použitý v metadatech generovaných příběhů (`ai.model`) a pravidla pro archivaci příběhů (`stories.directory`, `stories.extension`,
   `stories.timestamp_format`). Pokud soubor chybí, aplikace automaticky použije bezpečné výchozí hodnoty.
 
+## AI Providers
+- Backend používá deterministický **heuristic** adaptér, pokud není nastaven žádný API klíč. Jakmile definujete `GEMINI_API_KEY`,
+  proměnná `AI_PROVIDER=gemini` aktivuje dva klienty:
+  - `AI_VALIDATOR_MODEL` (výchozí `gemini-2.5-pro`) analyzuje a ověřuje konzistenci příběhu.
+  - `AI_WRITER_MODEL` (výchozí `gemini-2.5-flash`) generuje Markdown podklady pro časovou osu, entity a shrnutí.
+- V souboru `config.yml` můžete volitelně uložit `ai.gemini_api_key`, `ai.validator_model` a `ai.writer_model`. Proměnné prostředí mají vždy
+  přednost a zamezí náhodnému zalogování tajných údajů.
+- Pokud API klíč chybí nebo je poskytovatel nastaven na `heuristic`, systém plynule přepne na deterministickou strategii a zachová kompatibilitu
+  se stávajícími projekty.
+- Rychlé nastavení:
+  ```bash
+  export GEMINI_API_KEY="your-secret"
+  export AI_PROVIDER="gemini"
+  export AI_VALIDATOR_MODEL="gemini-2.5-pro"
+  export AI_WRITER_MODEL="gemini-2.5-flash"
+  ```
+- Dokumentace API (`/docs`) nyní zmiňuje, že validace využívá Gemini 2.5 Pro a generování obsahu Gemini 2.5 Flash, pokud jsou tyto modely aktivní.
+
 ## API Notes
 - When creating projects programmatically, send `name`, `git_url`, and (optionally) `git_token` in the request body to `/api/projects`. The API normalises GitHub zkrácený zápis `owner/repo` na plnou URL a vrací lidsky čitelné chyby pro neplatné vstupy.
 - The backend root endpoint (`/api/`) now returns a short status payload confirming the API is reachable and linking to the interactive documentation at `/docs`.
@@ -66,5 +84,11 @@ Run `bash scripts/update.sh` (or `make setup` again) to pull the latest code and
 - **Redis connection errors**: Ensure Redis is available locally or via Docker. Use `make stop` to clean up the development container.
 - **Backend fails to start**: Confirm that `backend/venv` exists and that `config.yml` contains valid values (zejména `security.secret_key`). If the virtual environment becomes corrupted or is missing activation scripts, rerun `make setup` to let the installer recreate it automatically.
 - **Node dependencies missing**: Re-run `npm install` inside the `frontend/` directory or execute `make setup`.
+
+## Stage 3 acceptance checklist
+- **Configuration** – Verify that `GEMINI_API_KEY`, `AI_PROVIDER`, `AI_VALIDATOR_MODEL`, and `AI_WRITER_MODEL` are present either in the environment or `config.yml`; see the snippets above for reference values.
+- **Changed files** – Run `git status --short` or `git diff --stat` to review updates across adapters, configuration helpers, Celery tasks, and documentation.
+- **Quick test** – Execute `pytest elka-studio/backend/tests/test_uce_core.py::test_plan_changes_uses_writer_for_body` to confirm the writer adapter is routed to Gemini Flash, or run the full suite with `pytest`.
+- **Commit message** – Use a Conventional Commits prefix such as `feat: integrate gemini adapters for lore workflows` when recording the work on the feature branch.
 
 Happy world-building!
