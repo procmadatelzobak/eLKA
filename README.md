@@ -49,6 +49,9 @@ eLKA Studio is a full-stack application for building and managing fictional univ
 - Execute `pytest elka-studio/backend/tests/test_uce_core.py` to run deterministic unit tests covering fact extraction, universe loading, planner no-op detection, and Git application helpers.
 - The suite provisions temporary Git repositories to simulate dry-run and apply flows, confirming that repeated runs emit explicit "no changes" notes instead of silent exits.
 
+## Testing task status updates
+- Run `pytest elka-studio/backend/tests/test_tasks_api.py` to verify that pausing a task updates the database record and broadcasts a notification through the shared `TaskManager` instance without raising errors.
+
 ## Project Structure
 - `backend/` – FastAPI application, Celery configuration, and Python business logic.
 - `frontend/` – React + Vite single-page application for interacting with eLKA Studio.

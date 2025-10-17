@@ -112,7 +112,7 @@ def _update_task_status(session: Session, task_id: int, status_value: str) -> Ta
     session.add(task)
     session.commit()
     session.refresh(task)
-    TaskManager._broadcast_update(task.project_id)
+    task_manager.broadcast_update(task.project_id)
     return task
 
 
