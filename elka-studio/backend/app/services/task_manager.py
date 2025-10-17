@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from typing import Callable
+from copy import deepcopy
+from typing import Any, Callable
 
 from celery.result import AsyncResult
 from sqlalchemy.orm import Session
@@ -24,10 +25,16 @@ class TaskManager:
         """Create a task record and dispatch the corresponding Celery job."""
 
         params = dict(params or {})
+        persisted_params = deepcopy(params)
         params.setdefault("project_id", project_id)
         session = self._session_factory()
         try:
-            task = Task(project_id=project_id, type=task_type, status=TaskStatus.PENDING)
+            task = Task(
+                project_id=project_id,
+                type=task_type,
+                status=TaskStatus.PENDING,
+                params=persisted_params or None,
+            )
             session.add(task)
             session.commit()
             session.refresh(task)
@@ -49,6 +56,7 @@ class TaskManager:
         status: str,
         progress: int | None = None,
         log_message: str | None = None,
+        result: dict[str, Any] | None = None,
     ) -> None:
         """Persist task status changes and broadcast them to websocket clients."""
 
@@ -68,6 +76,12 @@ class TaskManager:
                 task.progress = progress
             if log_message:
                 task.log = f"{task.log}\n{log_message}" if task.log else log_message
+            if result is not None:
+                payload = deepcopy(result)
+                if isinstance(task.result, dict) and isinstance(payload, dict):
+                    task.result = {**task.result, **payload}
+                else:
+                    task.result = payload
 
             session.add(task)
             session.commit()

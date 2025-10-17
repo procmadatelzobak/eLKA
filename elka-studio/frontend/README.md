@@ -46,6 +46,7 @@ Stránka `ProjectDashboardPage` slouží jako hlavní pracovní prostředí pro 
 
 - Ovládací panel se stará o validaci a odeslání požadavků pomocí funkce `createTask` z modulu `src/services/api.js`.
 - Fronta úloh využívá službu `TaskSocket` (`src/services/websocket.js`) pro připojení na endpoint `/ws/tasks/{projectId}` a zobrazuje průběh včetně logů.
+- Jakmile se úloha dokončí, lze přímo ve frontě otevřít náhled vygenerovaného příběhu nebo souborů archivace díky modálnímu dialogu.
 - Akce pozastavení a opětovného spuštění úlohy lze volat funkcemi `pauseTask` a `resumeTask`.
 
 ### Konfigurace WebSocketu

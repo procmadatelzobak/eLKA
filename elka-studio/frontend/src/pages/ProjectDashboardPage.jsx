@@ -32,6 +32,7 @@ const ProjectDashboardPage = () => {
   const [taskActionMessage, setTaskActionMessage] = useState(null);
   const [expandedTasks, setExpandedTasks] = useState([]);
   const [pendingActions, setPendingActions] = useState({});
+  const [modalContent, setModalContent] = useState(null);
 
   useEffect(() => {
     const socket = new TaskSocket();
@@ -48,6 +49,23 @@ const ProjectDashboardPage = () => {
     setFormError(null);
     setFormMessage(null);
   }, [activeTab]);
+
+  useEffect(() => {
+    if (!modalContent) {
+      return undefined;
+    }
+
+    const handleKeyDown = (event) => {
+      if (event.key === 'Escape') {
+        setModalContent(null);
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [modalContent]);
 
   const sortedTasks = useMemo(() => {
     if (!Array.isArray(tasks)) {
@@ -118,6 +136,40 @@ const ProjectDashboardPage = () => {
     } finally {
       setPendingState(taskId, action, false);
     }
+  };
+
+  const closeModal = () => setModalContent(null);
+
+  const openStoryModal = (task) => {
+    const story = task?.result?.story;
+    if (!story) {
+      return;
+    }
+
+    setModalContent({
+      type: 'story',
+      title: `Příběh úlohy #${task.id}`,
+      data: {
+        story,
+        seed: task?.params?.seed ?? null,
+      },
+    });
+  };
+
+  const openFilesModal = (task) => {
+    const files = task?.result?.files;
+    if (!files || Object.keys(files).length === 0) {
+      return;
+    }
+
+    setModalContent({
+      type: 'files',
+      title: `Soubory zpracování #${task.id}`,
+      data: {
+        files,
+        metadata: task?.result?.metadata ?? null,
+      },
+    });
   };
 
   const handleSubmit = async (event, type) => {
@@ -330,6 +382,10 @@ const ProjectDashboardPage = () => {
                 const progressValue = getProgressValue(task);
                 const statusColor = statusColors[task.status] || '#94a3b8';
                 const expanded = isTaskExpanded(task.id);
+                const storyText = typeof task?.result?.story === 'string' ? task.result.story.trim() : '';
+                const files = task?.result?.files;
+                const hasStory = storyText.length > 0;
+                const hasFiles = files && Object.keys(files).length > 0;
 
                 return (
                   <article key={task.id} className="task-card">
@@ -382,6 +438,29 @@ const ProjectDashboardPage = () => {
                       </button>
                     </div>
 
+                    {(hasStory || hasFiles) && (
+                      <div className="task-card__details">
+                        {hasStory && (
+                          <button
+                            type="button"
+                            className="task-card__detail-action"
+                            onClick={() => openStoryModal(task)}
+                          >
+                            Zobrazit příběh
+                          </button>
+                        )}
+                        {hasFiles && (
+                          <button
+                            type="button"
+                            className="task-card__detail-action"
+                            onClick={() => openFilesModal(task)}
+                          >
+                            Zobrazit soubory
+                          </button>
+                        )}
+                      </div>
+                    )}
+
                     {expanded && (
                       <div className="task-card__log">
                         {task.log ? <pre>{task.log}</pre> : <p className="task-card__log-placeholder">Záznam zatím není k dispozici.</p>}
@@ -394,6 +473,66 @@ const ProjectDashboardPage = () => {
           )}
         </section>
       </div>
+
+      {modalContent && (
+        <div className="task-modal">
+          <div className="task-modal__backdrop" role="presentation" onClick={closeModal} />
+          <div className="task-modal__dialog" role="dialog" aria-modal="true" aria-label={modalContent.title}>
+            <header className="task-modal__header">
+              <h3>{modalContent.title}</h3>
+              <button type="button" className="task-modal__close" onClick={closeModal} aria-label="Zavřít detail úlohy">
+                ×
+              </button>
+            </header>
+
+            <div className="task-modal__body">
+              {modalContent.type === 'story' && (
+                <div className="task-modal__story">
+                  {modalContent.data.seed && (
+                    <p className="task-modal__meta">
+                      <strong>Seed:</strong> {modalContent.data.seed}
+                    </p>
+                  )}
+                  <pre className="task-modal__story-text">{modalContent.data.story}</pre>
+                </div>
+              )}
+
+              {modalContent.type === 'files' && (
+                <div className="task-modal__files">
+                  {modalContent.data.metadata?.summary && (
+                    <p className="task-modal__meta">
+                      <strong>Souhrn:</strong> {modalContent.data.metadata.summary}
+                    </p>
+                  )}
+                  {modalContent.data.metadata?.relative_path && (
+                    <p className="task-modal__meta">
+                      <strong>Cílový soubor:</strong> {modalContent.data.metadata.relative_path}
+                    </p>
+                  )}
+                  {Object.entries(modalContent.data.files || {}).length === 0 ? (
+                    <p className="task-modal__placeholder">Žádné soubory nebyly vygenerovány.</p>
+                  ) : (
+                    Object.entries(modalContent.data.files || {}).map(([path, content]) => (
+                      <section key={path} className="task-modal__file">
+                        <header className="task-modal__file-header">
+                          <h4>{path}</h4>
+                        </header>
+                        <pre className="task-modal__file-content">{content}</pre>
+                      </section>
+                    ))
+                  )}
+                </div>
+              )}
+            </div>
+
+            <footer className="task-modal__footer">
+              <button type="button" className="task-modal__close-button" onClick={closeModal}>
+                Zavřít
+              </button>
+            </footer>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

@@ -310,6 +310,17 @@ def process_story_task(
             )
             return
 
+        manager.update_task_status(
+            celery_task_id,
+            TaskStatus.RUNNING,
+            progress=75,
+            log_message="Prepared files for commit.",
+            result={
+                "files": files_to_commit,
+                "metadata": archive_result.metadata,
+            },
+        )
+
         commit_summary = archive_result.metadata.get("summary", "New story")
         commit_message = f"Add lore entry: {commit_summary}"
 
@@ -374,6 +385,7 @@ def generate_story_from_seed_task(
             TaskStatus.RUNNING,
             progress=55,
             log_message="Story drafted. Scheduling processing pipeline.",
+            result={"story": story_content},
         )
 
         process_params = {"story_content": story_content}
