@@ -21,6 +21,9 @@ ai:
   # - "heuristic" (deterministic fallback that avoids external services)
   # - "gemini" (requires GEMINI_API_KEY)
   provider: "heuristic"
+  models:
+    gemini-pro: "gemini-2.5-pro"
+    gemini-flash: "gemini-2.5-flash"
   # Optional explicit API key when you prefer storing it in the config file
   # instead of the environment. The environment variable always takes
   # precedence and secrets should never be committed.

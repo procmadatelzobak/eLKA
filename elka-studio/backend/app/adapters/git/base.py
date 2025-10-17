@@ -52,10 +52,25 @@ class GitAdapter:
             written.append(destination)
         return written
 
-    def create_branch(self, branch: str, repo_path: Path | None = None) -> None:
+    def create_branch(
+        self,
+        branch: str,
+        repo_path: Path | None = None,
+        base: str | None = None,
+    ) -> None:
         """Ensure the target branch exists and is checked out."""
 
         repository = git.Repo(repo_path) if repo_path else self.repo
+        if base:
+            available_branches = {head.name for head in repository.branches}
+            if base not in available_branches:
+                try:
+                    repository.git.fetch("origin", base)
+                    repository.git.checkout("-B", base, f"origin/{base}")
+                except GitCommandError:
+                    repository.git.checkout("-b", base)
+            else:
+                repository.git.checkout(base)
         branch_names = {head.name for head in repository.branches}
         if branch in branch_names:
             repository.git.checkout(branch)
@@ -82,6 +97,80 @@ class GitAdapter:
 
         target = branch or self._current_branch()
         self._push(target)
+
+    def merge_branch(
+        self,
+        source_branch: str,
+        target_branch: str | None = None,
+        *,
+        delete_source: bool = False,
+    ) -> str:
+        """Merge ``source_branch`` into ``target_branch`` and push the result.
+
+        Returns the resulting merge commit SHA. When ``delete_source`` is true,
+        the local and remote source branches are removed after a successful
+        merge.
+        """
+
+        if self.repo.is_dirty(index=True, working_tree=True, untracked_files=True):
+            raise RuntimeError("Cannot merge branches with uncommitted changes present")
+
+        target = target_branch or self.config.default_branch
+        try:
+            origin = self.repo.remote(name="origin")
+        except ValueError as exc:  # pragma: no cover - remote missing
+            raise RuntimeError("No 'origin' remote configured for repository") from exc
+        origin.fetch()
+
+        current_branch = self._current_branch()
+        branches = {head.name for head in self.repo.branches}
+
+        try:
+            if source_branch not in branches:
+                self.repo.git.fetch("origin", source_branch)
+                self.repo.git.checkout("-B", source_branch, f"origin/{source_branch}")
+            else:
+                self.repo.git.checkout(source_branch)
+                try:
+                    origin.pull(source_branch)
+                except GitCommandError:
+                    pass
+
+            self.repo.git.checkout(target)
+            try:
+                origin.pull(target)
+            except GitCommandError:
+                pass
+
+            try:
+                self.repo.git.merge(source_branch)
+            except GitCommandError as exc:
+                raise RuntimeError(
+                    f"Failed to merge branch '{source_branch}' into '{target}'"
+                ) from exc
+            merge_commit = self.repo.head.commit.hexsha
+            self._push(target)
+
+            if delete_source:
+                try:
+                    self.repo.git.branch("-D", source_branch)
+                except GitCommandError:
+                    pass
+                try:
+                    origin.push(refspec=f":{source_branch}")
+                except GitCommandError:
+                    pass
+
+            return merge_commit
+        finally:
+            try:
+                self.repo.git.checkout(target)
+            except GitCommandError:
+                if current_branch and current_branch in {head.name for head in self.repo.branches}:
+                    try:
+                        self.repo.git.checkout(current_branch)
+                    except GitCommandError:
+                        pass
 
     def _current_branch(self) -> str:
         try:

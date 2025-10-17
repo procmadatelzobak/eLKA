@@ -217,12 +217,9 @@ def uce_process_story_task(
             return
 
         git_adapter = app_context.create_git_adapter(project)
-        timestamp = datetime.utcnow().strftime("%Y%m%d%H%M")
-        project_slug = _slugify(project.name or "project")
-        branch_slug = _slugify(story_text.splitlines()[0] if story_text else project.name)
-        branch_identifier = branch_slug or project_slug or "run"
-        branch_name = f"uce/{timestamp}-{branch_identifier[:40]}"
-        git_adapter.create_branch(branch_name)
+        branch_name = f"task/process-story-{task_db_id}"
+        base_branch = app_context.config.default_branch
+        git_adapter.create_branch(branch_name, base=base_branch)
         git_adapter.apply_changeset(changeset)
         commit_sha = git_adapter.commit_all(
             f"Add UCE changes for {project.name}",
@@ -236,11 +233,13 @@ def uce_process_story_task(
             log_message=f"UCE applied changes on {branch_name}, commit {commit_sha}",
             result={
                 "branch": branch_name,
+                "base_branch": base_branch,
                 "commit_sha": commit_sha,
                 "diff_preview": diff_preview_text,
                 "summary": changeset.summary,
                 "files": [file.path for file in changeset.files],
                 "mode": "apply",
+                "approval_required": True,
             },
         )
     except Exception as exc:  # pragma: no cover - defensive logging

@@ -128,11 +128,30 @@ def resume_task(task_id: int, session: Session = Depends(get_session)) -> dict:
     return task.to_dict()
 
 
+@router.post("/{task_id}/approve", summary="Approve task result")
+def approve_task(task_id: int, session: Session = Depends(get_session)) -> dict:
+    try:
+        task = task_manager.approve_task(task_id, session=session)
+    except LookupError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+    except Exception as exc:  # pragma: no cover - defensive branch
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=str(exc),
+        ) from exc
+
+    return task.to_dict()
+
+
 class ProcessStoryRequest(BaseModel):
     """Payload for invoking the Universe Consistency Engine.
 
     ``apply`` toggles between dry-run (default) and applying the resulting
-    changeset to a dedicated ``uce/YYYYmmddHHMM-<slug>`` branch. Dry-runs
+    changeset to a dedicated ``task/process-story-<task_id>`` branch. Dry-runs
     persist the diff preview in the task record without modifying the
     repository.
     """
@@ -161,7 +180,8 @@ class ProcessStoryResponse(BaseModel):
     description=(
         "Start a Universe Consistency Engine run for the provided story. "
         "Dry-runs capture the unified diff in `result.diff_preview` while apply runs create "
-        "a `uce/<timestamp>-<slug>` branch, push it via the configured Git adapter, and persist the `commit_sha`. "
+        "a `task/process-story-<task_id>` branch, push it via the configured Git adapter, and persist the `commit_sha`. "
+        "The branch is merged into the default branch only after the task is approved via `/api/tasks/{task_id}/approve`. "
         "Any validation errors are surfaced through the task log and stored notes."
     ),
 )
@@ -181,6 +201,7 @@ def process_story(payload: ProcessStoryRequest) -> ProcessStoryResponse:
 __all__ = [
     "create_task",
     "list_tasks",
+    "approve_task",
     "pause_task",
     "resume_task",
     "process_story",
