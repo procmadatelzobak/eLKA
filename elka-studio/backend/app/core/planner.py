@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Iterable, List, Tuple
 
 from app.adapters.ai.base import BaseAIAdapter
+from app.utils.filesystem import sanitize_filename
 
 from .extractor import _slugify
 from .schemas import Changeset, ChangesetFile, FactEntity, FactEvent, FactGraph
@@ -66,7 +67,8 @@ def plan_changes(
     files: list[ChangesetFile] = []
     entity_updates = 0
     for entity in incoming.entities:
-        target = repo_path / "Objekty" / f"{entity.id}.md"
+        entity_slug = sanitize_filename(entity.id, default="entity")
+        target = repo_path / "Objekty" / f"{entity_slug}.md"
         old_content = target.read_text(encoding="utf-8") if target.exists() else None
 
         if old_content is None:

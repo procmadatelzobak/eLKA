@@ -11,6 +11,7 @@ from typing import Dict, Iterable, List
 from app.adapters.ai.base import BaseAIAdapter
 from app.adapters.git.base import GitAdapter
 from app.utils.config import Config
+from app.utils.filesystem import sanitize_filename
 
 from .extractor import _slugify
 from .schemas import FactEntity, FactEvent, FactGraph
@@ -70,9 +71,8 @@ class ArchivistEngine:
 
     @staticmethod
     def _slugify(value: str) -> str:
-        cleaned = re.sub(r"[^a-zA-Z0-9\s-]", "", value).strip().lower()
-        cleaned = re.sub(r"[-\s]+", "-", cleaned)
-        return cleaned[:40]
+        sanitized = sanitize_filename(value, default="story")
+        return sanitized[:40]
 
     @staticmethod
     def _build_document(story_content: str, summary: str) -> str:

@@ -35,14 +35,15 @@ eLKA Studio is a full-stack application for building and managing fictional univ
   přednost před hodnotou ze souboru.
 - Soubor `config.yml` podporuje také sekce `git`, `ai` a `stories`. Pomocí nich určíte výchozí Git větev (`git.default_branch`), název
   modelu použitý v metadatech generovaných příběhů (`ai.model`) a pravidla pro archivaci příběhů (`stories.directory`, `stories.extension`,
-  `stories.timestamp_format`). Pokud soubor chybí, aplikace automaticky použije bezpečné výchozí hodnoty.
+  `stories.timestamp_format`). Sekce `ai.models` definuje aliasy (`gemini-pro`, `gemini-flash`) a výchozí modely aktuální generace (`gemini-2.5`).
+  Pokud soubor chybí, aplikace automaticky použije bezpečné výchozí hodnoty.
 
 ## AI Providers
 - Backend používá deterministický **heuristic** adaptér, pokud není nastaven žádný API klíč. Jakmile definujete `GEMINI_API_KEY`,
   aktivují se dva klienti:
   - `AI_VALIDATOR_MODEL` (výchozí `gemini-2.5-pro`) analyzuje a ověřuje konzistenci příběhu.
   - `AI_WRITER_MODEL` (výchozí `gemini-2.5-flash`) generuje Markdown podklady pro časovou osu, entity a shrnutí.
-- V souboru `config.yml` můžete volitelně uložit `ai.gemini_api_key`, `ai.validator_model` a `ai.writer_model`. Proměnné prostředí mají vždy
+- V souboru `config.yml` můžete volitelně uložit `ai.gemini_api_key`, `ai.validator_model`, `ai.writer_model` a aliasy v `ai.models`. Proměnné prostředí mají vždy
   přednost a zamezí náhodnému zalogování tajných údajů.
 - Pokud API klíč chybí nebo je poskytovatel nastaven na `heuristic`, systém plynule přepne na deterministickou strategii a zachová kompatibilitu
   se stávajícími projekty.
@@ -53,6 +54,9 @@ eLKA Studio is a full-stack application for building and managing fictional univ
   # config.yml
   ai:
     provider: "gemini"
+    models:
+      gemini-pro: "gemini-2.5-pro"
+      gemini-flash: "gemini-2.5-flash"
     validator_model: "gemini-2.5-pro"
     writer_model: "gemini-2.5-flash"
   ```
@@ -68,6 +72,9 @@ eLKA Studio is a full-stack application for building and managing fictional univ
    ```yaml
    ai:
      provider: "gemini"
+     models:
+       gemini-pro: "gemini-2.5-pro"
+       gemini-flash: "gemini-2.5-flash"
      validator_model: "gemini-2.5-pro"
      writer_model: "gemini-2.5-flash"
    ```
@@ -103,8 +110,9 @@ eLKA Studio is a full-stack application for building and managing fictional univ
      -d '{"project_id": 1, "story_text": "Legenda o jarní bitvě", "apply": true}'
    ```
 
-   Worker vytvoří větev `uce/<YYYYmmddHHMM>-<project_slug>`, zapíše změny, provede commit a `git push`. Výsledný `commit_sha`
-   i náhled diffu najdete v `result.commit_sha` a `result.diff_preview` tasku.
+   Worker vytvoří větev `task/process-story-<TASK_ID>`, zapíše změny, provede commit a `git push`. Výsledný `commit_sha`
+   i náhled diffu najdete v `result.commit_sha` a `result.diff_preview` tasku. Větev zůstává dočasná, dokud výsledek
+   neschválíte přes `POST /api/tasks/{task_id}/approve`, který změny sloučí do výchozí větve projektu.
 
 6. **Idempotence** – opakované spuštění se stejným příběhem vrátí `notes: ["no-op: universe already up-to-date"]` a prázdný diff,
    protože časová osa i entity se normalizují deterministicky (roční období mapujeme na kvartály, duplikáty poznáme podle
@@ -123,7 +131,8 @@ eLKA Studio is a full-stack application for building and managing fictional univ
 - The backend root endpoint (`/api/`) now returns a short status payload confirming the API is reachable and linking to the interactive documentation at `/docs`.
 - Existing clients should be updated to use the new field names to avoid validation errors.
 - Manual story submissions must send the text inside the `params.story_content` field when calling `POST /api/tasks/`. The dashboard form handles this automatically, but custom integrations should update their payloads to avoid `story_content must be a non-empty string` errors.
-- The Universe Consistency Engine is available via `POST /api/tasks/story/process` with `project_id`, `story_text`, and optional `apply` flag. Dry-run responses report the planned diff; apply mode writes commits on a dedicated `uce/<project>` branch.
+- The Universe Consistency Engine is available via `POST /api/tasks/story/process` with `project_id`, `story_text`, and optional `apply` flag. Dry-run responses report the planned diff; apply režim ukládá změny na dočasnou větev `task/process-story-<TASK_ID>`, která se po schválení sloučí do výchozí větve.
+- Výsledek tasku schválíte přes `POST /api/tasks/{task_id}/approve`. Endpoint nastaví `result_approved = true`, provede merge do hlavní větve (např. `main`) a aktualizuje `result.merge_commit` s výsledným SHA.
 - When a project stores an encrypted Git token, Celery tasks now decrypt it and use a credential helper during `git push`, preventing repeated interactive GitHub login prompts during story processing or saga generation.
 - Celery workers now share a singleton application context (`backend/app/core/context.py`) that bootstraps configuration, AI adapters, Git helpers, and validation/archival services once per worker. Task payloads must include the `project_id` (and optionally `pr_id`) so the worker can retrieve the correct repository without reopening the FastAPI stack for every job.
 

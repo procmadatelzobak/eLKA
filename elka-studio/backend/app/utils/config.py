@@ -11,7 +11,6 @@ This module exposes two levels of helpers:
 from __future__ import annotations
 
 import os
-import re
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
@@ -19,6 +18,7 @@ from typing import Any, Dict, Optional
 
 import yaml
 
+from app.utils.filesystem import sanitize_filename
 
 def find_config_file() -> Optional[Path]:
     """Return the first configuration file discovered for the application."""
@@ -219,7 +219,7 @@ class Config:
     def story_filename(self, prefix: str) -> str:
         """Return a sanitized filename for an archived story."""
 
-        cleaned_prefix = re.sub(r"[^a-zA-Z0-9_-]", "-", prefix.strip()) or "story"
+        cleaned_prefix = sanitize_filename(prefix, default="story")
         timestamp = datetime.utcnow().strftime(self._timestamp_format)
         return f"{cleaned_prefix}-{timestamp}{self._story_extension}"
 

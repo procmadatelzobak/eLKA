@@ -11,7 +11,9 @@ from sqlalchemy.orm import Session
 from app.celery_app import celery_app
 from app.db.redis_client import get_redis_client
 from app.db.session import SessionLocal
+from app.models.project import Project
 from app.models.task import Task, TaskStatus
+from app.core.context import app_context
 
 
 class TaskManager:
@@ -92,6 +94,40 @@ class TaskManager:
         if project_id is not None:
             self._broadcast_update(project_id)
 
+    def approve_task(self, task_id: int, session: Session | None = None) -> Task:
+        """Mark the task result as approved and finalise any pending changes."""
+
+        owns_session = session is None
+        db_session = session or self._session_factory()
+
+        try:
+            task = db_session.query(Task).filter(Task.id == task_id).one_or_none()
+            if task is None:
+                raise LookupError(f"Task with id {task_id} does not exist")
+            if task.status != TaskStatus.SUCCESS:
+                raise ValueError("Only successful tasks can be approved")
+            if task.result_approved:
+                db_session.expunge(task)
+                return task
+
+            task.result_approved = True
+            db_session.add(task)
+            db_session.commit()
+            db_session.refresh(task)
+            db_session.expunge(task)
+        finally:
+            if owns_session:
+                db_session.close()
+
+        try:
+            final_task = self._finalise_task(task)
+        except Exception:
+            self._set_task_approval(task.id, False)
+            raise
+
+        self.broadcast_update(task.project_id)
+        return final_task
+
     def _dispatch_to_celery(self, task_type: str, task_db_id: int, params: dict) -> AsyncResult:
         """Map task types to Celery jobs and enqueue the appropriate task."""
 
@@ -131,6 +167,69 @@ class TaskManager:
         """Public helper for notifying listeners about task changes."""
 
         self._broadcast_update(project_id)
+
+    def _finalise_task(self, task: Task) -> Task:
+        """Perform repository operations required after task approval."""
+
+        result_payload: dict[str, Any] = {}
+        if isinstance(task.result, dict):
+            result_payload = deepcopy(task.result)
+
+        branch_name = result_payload.get("branch")
+        if not branch_name:
+            return task
+
+        project = self._load_project(task.project_id)
+        git_adapter = app_context.create_git_adapter(project)
+        target_branch = app_context.config.default_branch
+        merge_commit = git_adapter.merge_branch(branch_name, target_branch)
+
+        session = self._session_factory()
+        try:
+            stored_task = session.query(Task).filter(Task.id == task.id).one_or_none()
+            if stored_task is None:
+                raise LookupError(f"Task {task.id} not found during finalisation")
+
+            result_data: dict[str, Any] = {}
+            if isinstance(stored_task.result, dict):
+                result_data = deepcopy(stored_task.result)
+
+            result_data.update({
+                "merged_into": target_branch,
+                "merge_commit": merge_commit,
+                "approval_required": False,
+            })
+            stored_task.result = result_data
+            session.add(stored_task)
+            session.commit()
+            session.refresh(stored_task)
+            session.expunge(stored_task)
+            return stored_task
+        finally:
+            session.close()
+
+    def _load_project(self, project_id: int) -> Project:
+        session = self._session_factory()
+        try:
+            project = session.query(Project).filter(Project.id == project_id).one_or_none()
+            if project is None:
+                raise LookupError(f"Project with id {project_id} does not exist")
+            session.expunge(project)
+            return project
+        finally:
+            session.close()
+
+    def _set_task_approval(self, task_id: int, approved: bool) -> None:
+        session = self._session_factory()
+        try:
+            task = session.query(Task).filter(Task.id == task_id).one_or_none()
+            if task is None:
+                return
+            task.result_approved = approved
+            session.add(task)
+            session.commit()
+        finally:
+            session.close()
 
 
 __all__ = ["TaskManager"]

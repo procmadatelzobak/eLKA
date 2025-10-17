@@ -6,8 +6,9 @@ from copy import deepcopy
 from datetime import datetime
 from typing import TYPE_CHECKING, Any
 
-from sqlalchemy import JSON, Column, DateTime, ForeignKey, Integer, String, Text, func
+from sqlalchemy import Boolean, JSON, Column, DateTime, ForeignKey, Integer, String, Text, func
 from sqlalchemy.orm import Mapped, relationship
+from sqlalchemy.sql import expression
 
 
 class TaskStatus(str):
@@ -39,6 +40,12 @@ class Task(Base):
     progress: Mapped[int | None] = Column(Integer, nullable=True)
     params: Mapped[dict[str, Any] | None] = Column(JSON, nullable=True, default=dict)
     result: Mapped[dict[str, Any] | None] = Column(JSON, nullable=True, default=dict)
+    result_approved: Mapped[bool] = Column(
+        Boolean,
+        nullable=False,
+        default=False,
+        server_default=expression.false(),
+    )
     created_at: Mapped[datetime] = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
     updated_at: Mapped[datetime] = Column(
         DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now()
@@ -58,6 +65,7 @@ class Task(Base):
             "progress": self.progress,
             "params": deepcopy(self.params) if self.params is not None else None,
             "result": deepcopy(self.result) if self.result is not None else None,
+            "result_approved": self.result_approved,
             "created_at": self.created_at.isoformat() if self.created_at else None,
             "updated_at": self.updated_at.isoformat() if self.updated_at else None,
         }
