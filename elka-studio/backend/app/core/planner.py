@@ -268,14 +268,14 @@ def _normalize_date_key(raw: str | None, slug: str) -> Tuple[int, int, int, str]
     season_map = {
         "zima": 1,
         "winter": 1,
-        "jaro": 2,
-        "spring": 2,
-        "léto": 3,
-        "leto": 3,
-        "summer": 3,
-        "podzim": 4,
-        "autumn": 4,
-        "fall": 4,
+        "jaro": 4,
+        "spring": 4,
+        "léto": 7,
+        "leto": 7,
+        "summer": 7,
+        "podzim": 10,
+        "autumn": 10,
+        "fall": 10,
     }
 
     year = 9999

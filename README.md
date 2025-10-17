@@ -59,13 +59,62 @@ eLKA Studio is a full-stack application for building and managing fictional univ
 - Dokumentace API (`/docs`) nyní zmiňuje, že validace využívá Gemini 2.5 Pro a generování obsahu Gemini 2.5 Flash, pokud jsou tyto modely aktivní.
 
 ## Universe Consistency Engine workflow
-- `POST /api/tasks/story/process` přijímá `{ project_id, story_text, apply? }`. Výchozí režim **DRY-RUN** provede extrakci faktů,
-  zvaliduje kontinuitu a uloží náhled diffu (včetně nových souborů `Objekty/<slug>.md` a změn v `timeline.md`) do výsledku úlohy.
-- Nastavte `apply: true`, chcete-li automaticky vytvořit větev `uce/<timestamp>-<slug>`, zapsat změny do repozitáře a provést commit.
-  Identifikátor commitu i větev se objeví v detailu tasku.
-- Aktualizace se deterministicky řadí: entity zachovávají stabilní identifikátory a časová osa používá normalizované klíče (včetně ročních období),
-  takže opakované spuštění se stejným příběhem neprodukuje duplicitní záznamy.
-- Když Gemini není k dispozici, heuristický adaptér stále vrací reprodukovatelný výstup – diff náhledu i commit budou konzistentní napříč běhy.
+
+### Quickstart
+
+1. **Konfigurace** – zkopírujte `config.yml.example` a minimálně vyplňte sekci `security.secret_key`. Aktivace Gemini probíhá
+   přes `ai.provider: "gemini"` a modelové volby:
+
+   ```yaml
+   ai:
+     provider: "gemini"
+     validator_model: "gemini-2.5-pro"
+     writer_model: "gemini-2.5-flash"
+   ```
+
+2. **Proměnné prostředí** – vytvořte `.env` (načítá ho `make run-dev`) například takto:
+
+   ```dotenv
+   GEMINI_API_KEY=your-secret
+   AI_PROVIDER=gemini
+   AI_VALIDATOR_MODEL=gemini-2.5-pro
+   AI_WRITER_MODEL=gemini-2.5-flash
+   ```
+
+3. **Spuštění služeb** – v jednom terminálu spusťte backend a Celery `make run-backend`, ve druhém `make run-worker`. Frontend
+   (`make run-frontend`) je volitelný, pro testování API postačí backend + worker.
+
+4. **DRY-RUN** – odešlete příběh bez aplikace změn:
+
+   ```bash
+   curl -X POST http://localhost:8000/api/tasks/story/process \
+     -H "Content-Type: application/json" \
+     -d '{"project_id": 1, "story_text": "Legenda o jarní bitvě"}'
+   ```
+
+   Odpověď `{ "task_id": ..., "celery_task_id": ... }` odkazuje na záznam v databázi. Po dokončení tasku najdete v `result.diff_preview`
+   kompletní unified diff a seznam souborů, aniž by se repo jakkoli změnilo.
+
+5. **APPLY** – spusťte stejný příběh s `apply: true`:
+
+   ```bash
+   curl -X POST http://localhost:8000/api/tasks/story/process \
+     -H "Content-Type: application/json" \
+     -d '{"project_id": 1, "story_text": "Legenda o jarní bitvě", "apply": true}'
+   ```
+
+   Worker vytvoří větev `uce/<YYYYmmddHHMM>-<project_slug>`, zapíše změny, provede commit a `git push`. Výsledný `commit_sha`
+   i náhled diffu najdete v `result.commit_sha` a `result.diff_preview` tasku.
+
+6. **Idempotence** – opakované spuštění se stejným příběhem vrátí `notes: ["no-op: universe already up-to-date"]` a prázdný diff,
+   protože časová osa i entity se normalizují deterministicky (roční období mapujeme na kvartály, duplikáty poznáme podle
+   normalizovaného datového klíče).
+
+### Další informace
+
+- `POST /api/tasks/story/process` přijímá `{ project_id, story_text, apply? }`. Výchozí režim **DRY-RUN** vždy uloží diff do tasku.
+- Legenda (`Legendy/*.md`) i šablona `templates/universe_scaffold/Legends/CORE_TRUTHS.md` se automaticky načítají při validaci.
+- Pokud Gemini chybí, heuristický adaptér neukončí běh – výsledné diffy i zápisy do Git zůstávají deterministické.
 - Rychlý lokální test: spusťte `pytest elka-studio/backend/tests/test_uce_pipeline.py` a ověřte kompletní průchod **DRY-RUN → APPLY → NO-OP**
   na dočasném Git repozitáři.
 

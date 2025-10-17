@@ -68,6 +68,28 @@ class RetryingAIAdapter(BaseAIAdapter):
         return response
 
 
+class ValidationRetryAdapter(BaseAIAdapter):
+    """Adapter capturing prompts and providing staged responses."""
+
+    def __init__(self, responses: Iterable[str]) -> None:
+        super().__init__(Config(data={}))
+        self._responses = list(responses)
+        self.prompts: list[str] = []
+        self._index = 0
+
+    def analyse(self, story_content: str, aspect: str):  # pragma: no cover - unused
+        return {}
+
+    def summarise(self, story_content: str) -> str:  # pragma: no cover - unused
+        return "summary"
+
+    def generate_json(self, system: str, user: str) -> str:  # type: ignore[override]
+        self.prompts.append(user)
+        response = self._responses[self._index]
+        self._index = min(self._index + 1, len(self._responses) - 1)
+        return response
+
+
 class LegendAIAdapter(BaseAIAdapter):
     """Adapter returning deterministic legend breach findings."""
 
@@ -123,6 +145,22 @@ def test_extract_fact_graph_retry_on_invalid_json() -> None:
     assert [event.title for event in graph.events] == ["Duel"]
 
 
+def test_extract_fact_graph_retry_on_validation_error() -> None:
+    invalid = json.dumps({
+        "entities": [{"id": "hero", "type": "mystery"}],
+        "events": [],
+    })
+    valid = json.dumps({
+        "entities": [{"id": "hero", "type": "person"}],
+        "events": [],
+    })
+    adapter = ValidationRetryAdapter([invalid, valid])
+    graph = extract_fact_graph("Story", adapter)
+    assert [entity.type for entity in graph.entities] == ["person"]
+    assert len(adapter.prompts) == 2
+    assert adapter.prompts[1].startswith("Return ONLY JSON.")
+
+
 def test_extract_fact_graph_invalid_payload_raises() -> None:
     adapter = DummyAIAdapter("not-json", json_responses=["also-bad", "still-bad"])
     with pytest.raises(ValueError):
@@ -153,6 +191,23 @@ def test_plan_changes_adds_timeline_events(universe_repo: Path) -> None:
     timeline_change = next(file for file in changeset.files if file.path.startswith("timeline"))
     assert "Battle of Spring" in timeline_change.new
     assert "1200 Founding of the order" in timeline_change.new
+
+
+def test_plan_changes_timeline_duplicate_detection(universe_repo: Path) -> None:
+    incoming = FactGraph(
+        events=[
+            FactEvent(
+                id="battle", title="Battle of Dawn", date="Spring 1202", participants=[]
+            )
+        ]
+    )
+    initial = plan_changes(FactGraph(), incoming, universe_repo)
+    timeline_file = next(file for file in initial.files if file.path.startswith("timeline"))
+    (universe_repo / timeline_file.path).write_text(timeline_file.new, encoding="utf-8")
+
+    refreshed = load_universe(universe_repo)
+    repeat = plan_changes(refreshed, incoming, universe_repo)
+    assert all(not file.path.startswith("timeline") for file in repeat.files)
 
 
 def test_plan_changes_uses_writer_for_body(universe_repo: Path) -> None:
@@ -218,6 +273,23 @@ def test_validate_universe_legend_skip_info() -> None:
     assert any(issue.code == "legend_breach_check_skipped" for issue in issues)
 
 
+def test_validate_universe_loads_template_truths() -> None:
+    class RecordingAdapter(LegendAIAdapter):
+        def __init__(self) -> None:
+            super().__init__([{"message": "conflict", "refs": ["fall"], "level": "error"}])
+            self.last_truths: list[str] = []
+
+        def generate_json(self, system: str, user: str) -> str:  # type: ignore[override]
+            payload = json.loads(user)
+            self.last_truths = payload.get("truths", [])
+            return super().generate_json(system, user)
+
+    ai = RecordingAdapter()
+    issues = validate_universe(FactGraph(), FactGraph(events=[FactEvent(id="fall", title="Hero falls")]), ai)
+    assert ai.last_truths
+    assert any(issue.code == "legend_breach" for issue in issues)
+
+
 def test_git_adapter_branch_and_commit(tmp_path: Path) -> None:
     repo = git.Repo.init(tmp_path)
     (tmp_path / "README.md").write_text("initial", encoding="utf-8")
@@ -250,5 +322,6 @@ def test_git_adapter_branch_and_commit(tmp_path: Path) -> None:
 __all__ = [
     "DummyAIAdapter",
     "RetryingAIAdapter",
+    "ValidationRetryAdapter",
     "LegendAIAdapter",
 ]
