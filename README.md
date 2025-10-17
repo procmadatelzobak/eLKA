@@ -85,4 +85,10 @@ Run `bash scripts/update.sh` (or `make setup` again) to pull the latest code and
 - **Backend fails to start**: Confirm that `backend/venv` exists and that `config.yml` contains valid values (zejména `security.secret_key`). If the virtual environment becomes corrupted or is missing activation scripts, rerun `make setup` to let the installer recreate it automatically.
 - **Node dependencies missing**: Re-run `npm install` inside the `frontend/` directory or execute `make setup`.
 
+## Stage 3 acceptance checklist
+- **Configuration** – Verify that `GEMINI_API_KEY`, `AI_PROVIDER`, `AI_VALIDATOR_MODEL`, and `AI_WRITER_MODEL` are present either in the environment or `config.yml`; see the snippets above for reference values.
+- **Changed files** – Run `git status --short` or `git diff --stat` to review updates across adapters, configuration helpers, Celery tasks, and documentation.
+- **Quick test** – Execute `pytest elka-studio/backend/tests/test_uce_core.py::test_plan_changes_uses_writer_for_body` to confirm the writer adapter is routed to Gemini Flash, or run the full suite with `pytest`.
+- **Commit message** – Use a Conventional Commits prefix such as `feat: integrate gemini adapters for lore workflows` when recording the work on the feature branch.
+
 Happy world-building!
