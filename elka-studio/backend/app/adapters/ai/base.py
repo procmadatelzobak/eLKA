@@ -23,6 +23,19 @@ class BaseAIAdapter(ABC):
     def summarise(self, story_content: str) -> str:
         """Return a compact summary suitable for commit messages or metadata."""
 
+        raise NotImplementedError
+
+    # Optional helpers -------------------------------------------------
+    def generate_markdown(self, instruction: str, context: str | None = None) -> str:
+        """Return Markdown content generated from the provided instruction."""
+
+        raise NotImplementedError
+
+    def generate_json(self, system: str, user: str) -> str:
+        """Return JSON text generated from a system/user prompt pair."""
+
+        raise NotImplementedError
+
 
 @dataclass(slots=True)
 class HeuristicAIAdapter(BaseAIAdapter):
@@ -83,6 +96,35 @@ class HeuristicAIAdapter(BaseAIAdapter):
             summary += "…"
         return summary
 
+    def generate_markdown(self, instruction: str, context: str | None = None) -> str:
+        """Deterministically combine instruction and context into Markdown."""
+
+        context_value = (context or "").strip()
+        if not context_value:
+            context_value = instruction.strip()
+
+        title = "Generated Entry"
+        if "entity" in instruction.lower():
+            title = "Entity Update"
+        elif "update" in instruction.lower():
+            title = "Update"
+
+        body = context_value
+        if not body.endswith("\n"):
+            body = f"{body}\n"
+
+        if title.lower() == "update":
+            return f"## Update\n{body}"
+        return f"# {title}\n{body}"
+
+    def generate_json(self, system: str, user: str) -> str:
+        """Return a deterministic JSON payload with system/user fields."""
+
+        import json
+
+        payload = {"system": system.strip(), "user": user.strip()}
+        return json.dumps(payload)
+
 
 def get_default_ai_adapter(config: Config) -> BaseAIAdapter:
     """Factory returning the default AI adapter used by workers."""
@@ -90,4 +132,24 @@ def get_default_ai_adapter(config: Config) -> BaseAIAdapter:
     return HeuristicAIAdapter(config=config)
 
 
-__all__ = ["BaseAIAdapter", "HeuristicAIAdapter", "get_default_ai_adapter"]
+def get_ai_adapters(config: Config) -> tuple[BaseAIAdapter, BaseAIAdapter]:
+    """Return validator and writer adapters based on configuration."""
+
+    provider = config.ai_provider()
+    if provider == "gemini" and config.get_gemini_api_key():
+        from app.adapters.ai.gemini import GeminiAdapter
+
+        validator = GeminiAdapter(config=config, model=config.validator_model())
+        writer = GeminiAdapter(config=config, model=config.writer_model())
+        return validator, writer
+
+    heuristic = HeuristicAIAdapter(config=config)
+    return heuristic, heuristic
+
+
+__all__ = [
+    "BaseAIAdapter",
+    "HeuristicAIAdapter",
+    "get_ai_adapters",
+    "get_default_ai_adapter",
+]

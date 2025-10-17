@@ -36,6 +36,12 @@ class DummyAIAdapter(BaseAIAdapter):
     def summarise(self, story_content: str) -> str:  # pragma: no cover - unused in tests
         return "summary"
 
+    def generate_markdown(self, instruction: str, context: str | None = None) -> str:  # pragma: no cover - unused
+        return (context or instruction).strip()
+
+    def generate_json(self, system: str, user: str) -> str:  # pragma: no cover - unused
+        return "{}"
+
 
 @pytest.fixture()
 def universe_repo(tmp_path: Path) -> Path:
@@ -112,6 +118,36 @@ def test_plan_changes_appends_new_update(universe_repo: Path) -> None:
     assert file_change.old == "# Ancient Fortress\n"
     assert file_change.new == "# Ancient Fortress\n\n## Update\nNew discovery revealed\n"
     assert changeset.summary == "Planned updates for 1 universe file(s)."
+
+
+def test_plan_changes_uses_writer_for_body(universe_repo: Path) -> None:
+    class RecordingWriter(BaseAIAdapter):
+        def __init__(self) -> None:
+            super().__init__(Config(data={}))
+            self.calls: list[tuple[str, str | None]] = []
+
+        def analyse(self, story_content: str, aspect: str):  # type: ignore[override]
+            return {}
+
+        def summarise(self, story_content: str) -> str:  # pragma: no cover - unused
+            return "summary"
+
+        def generate_markdown(self, instruction: str, context: str | None = None) -> str:  # type: ignore[override]
+            self.calls.append((instruction, context))
+            return "Generated lore body"
+
+        def generate_json(self, system: str, user: str) -> str:  # pragma: no cover - unused
+            return "{}"
+
+    writer = RecordingWriter()
+    incoming = FactGraph(entities=[FactEntity(id="artifact", type="artifact", summary="Ancient key")])
+
+    changeset = plan_changes(FactGraph(), incoming, universe_repo, writer)
+
+    assert len(changeset.files) == 1
+    new_file = changeset.files[0]
+    assert new_file.new == "# artifact\nGenerated lore body\n"
+    assert writer.calls
 
 
 def test_validate_universe_detects_conflicts() -> None:

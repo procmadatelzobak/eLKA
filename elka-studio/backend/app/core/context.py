@@ -6,7 +6,7 @@ import logging
 from threading import Lock
 from typing import Optional
 
-from app.adapters.ai.base import BaseAIAdapter, get_default_ai_adapter
+from app.adapters.ai.base import BaseAIAdapter, get_ai_adapters
 from app.adapters.git.base import GitAdapter
 from app.core.archivist import ArchivistEngine
 from app.core.validator import ValidatorEngine
@@ -36,18 +36,36 @@ class AppContext:
         self.config = Config()
         self.git_manager = GitManager(self.config.projects_dir)
         self._ai_adapter: Optional[BaseAIAdapter] = None
+        self._validator_ai: Optional[BaseAIAdapter] = None
+        self._writer_ai: Optional[BaseAIAdapter] = None
         self._validator: Optional[ValidatorEngine] = None
 
     @property
     def ai_adapter(self) -> BaseAIAdapter:
         if self._ai_adapter is None:
-            self._ai_adapter = get_default_ai_adapter(self.config)
+            self._ai_adapter = self.validator_ai
         return self._ai_adapter
+
+    @property
+    def validator_ai(self) -> BaseAIAdapter:
+        if self._validator_ai is None:
+            validator, writer = get_ai_adapters(self.config)
+            self._validator_ai = validator
+            self._writer_ai = writer
+        return self._validator_ai
+
+    @property
+    def writer_ai(self) -> BaseAIAdapter:
+        if self._writer_ai is None:
+            validator, writer = get_ai_adapters(self.config)
+            self._validator_ai = validator
+            self._writer_ai = writer
+        return self._writer_ai
 
     @property
     def validator(self) -> ValidatorEngine:
         if self._validator is None:
-            self._validator = ValidatorEngine(ai_adapter=self.ai_adapter, config=self.config)
+            self._validator = ValidatorEngine(ai_adapter=self.validator_ai, config=self.config)
         return self._validator
 
     def create_git_adapter(self, project: Project) -> GitAdapter:
@@ -56,7 +74,11 @@ class AppContext:
         return GitAdapter(project_path=project_path, config=self.config, token=token)
 
     def create_archivist(self, git_adapter: GitAdapter) -> ArchivistEngine:
-        return ArchivistEngine(git_adapter=git_adapter, ai_adapter=self.ai_adapter, config=self.config)
+        return ArchivistEngine(
+            git_adapter=git_adapter,
+            ai_adapter=self.writer_ai,
+            config=self.config,
+        )
 
     def _resolve_git_token(self, project: Project) -> str | None:
         encrypted = project.git_token

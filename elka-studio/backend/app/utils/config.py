@@ -100,7 +100,78 @@ class Config:
         """Identifier of the AI model used for story generation metadata."""
 
         ai_config = self.data.get("ai", {})
-        return str(ai_config.get("model", "heuristic-v1"))
+
+        if self.ai_provider() == "gemini":
+            return self.writer_model()
+
+        configured_model = ai_config.get("model")
+        if configured_model:
+            return str(configured_model)
+
+        return "heuristic-v1"
+
+    # ------------------------------------------------------------------
+    # AI provider helpers
+    # ------------------------------------------------------------------
+    def get_gemini_api_key(self) -> Optional[str]:
+        """Return the Gemini API key from the environment or config."""
+
+        env_key = os.getenv("GEMINI_API_KEY")
+        if env_key and env_key.strip():
+            return env_key.strip()
+
+        ai_config = self.data.get("ai", {})
+        key = ai_config.get("gemini_api_key")
+        if key:
+            cleaned = str(key).strip()
+            return cleaned or None
+        return None
+
+    def validator_model(self) -> str:
+        """Return the model identifier used for validation tasks."""
+
+        env_value = os.getenv("AI_VALIDATOR_MODEL")
+        if env_value and env_value.strip():
+            return env_value.strip()
+
+        ai_config = self.data.get("ai", {})
+        value = ai_config.get("validator_model")
+        if value and str(value).strip():
+            return str(value).strip()
+        return "gemini-2.5-pro"
+
+    def writer_model(self) -> str:
+        """Return the model identifier used for content generation."""
+
+        env_value = os.getenv("AI_WRITER_MODEL")
+        if env_value and env_value.strip():
+            return env_value.strip()
+
+        ai_config = self.data.get("ai", {})
+        value = ai_config.get("writer_model")
+        if value and str(value).strip():
+            return str(value).strip()
+        return "gemini-2.5-flash"
+
+    def ai_provider(self) -> str:
+        """Return the active AI provider, defaulting to heuristic fallback."""
+
+        env_value = os.getenv("AI_PROVIDER")
+        ai_config = self.data.get("ai", {})
+        provider = env_value or ai_config.get("provider")
+        provider_normalised = str(provider).strip().lower() if provider else ""
+        if provider_normalised not in {"gemini", "heuristic"}:
+            provider_normalised = ""
+
+        if provider_normalised == "gemini" and not self.get_gemini_api_key():
+            return "heuristic"
+
+        if provider_normalised:
+            return provider_normalised
+
+        if self.get_gemini_api_key():
+            return "gemini"
+        return "heuristic"
 
     # ------------------------------------------------------------------
     # Security helpers

@@ -17,6 +17,22 @@ git:
   default_branch: "main"
 
 ai:
+  # Select the AI provider used by the backend. Supported values:
+  # - "heuristic" (deterministic fallback that avoids external services)
+  # - "gemini" (requires GEMINI_API_KEY)
+  provider: "heuristic"
+  # Optional explicit API key when you prefer storing it in the config file
+  # instead of the environment. The environment variable always takes
+  # precedence and secrets should never be committed.
+  gemini_api_key: ""
+  # When provider == "gemini" the backend will call two separate models:
+  # - validator_model runs story validation and consistency checks.
+  # - writer_model generates markdown bodies (timeline/entity updates).
+  # You can override these per environment through AI_VALIDATOR_MODEL and
+  # AI_WRITER_MODEL environment variables.
+  validator_model: "gemini-2.5-pro"
+  writer_model: "gemini-2.5-flash"
+  # Existing clients relying on ai.model for metadata continue to work.
   model: "heuristic-v1"
 
 stories:
