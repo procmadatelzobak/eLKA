@@ -113,5 +113,10 @@ class TaskManager:
         except Exception:  # pragma: no cover - network/redis dependent
             pass
 
+    def broadcast_update(self, project_id: int) -> None:
+        """Public helper for notifying listeners about task changes."""
+
+        self._broadcast_update(project_id)
+
 
 __all__ = ["TaskManager"]
