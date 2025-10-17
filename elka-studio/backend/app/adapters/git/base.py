@@ -77,6 +77,12 @@ class GitAdapter:
         commit = self.repo.index.commit(message, author=author)
         return commit.hexsha
 
+    def push_branch(self, branch: str | None = None) -> None:
+        """Push the specified branch (or current branch) to origin."""
+
+        target = branch or self._current_branch()
+        self._push(target)
+
     def _current_branch(self) -> str:
         try:
             return self.repo.active_branch.name

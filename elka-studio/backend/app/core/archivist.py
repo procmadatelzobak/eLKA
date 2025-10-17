@@ -6,7 +6,7 @@ import re
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import Dict, List
+from typing import Dict, Iterable, List
 
 from app.adapters.ai.base import BaseAIAdapter
 from app.adapters.git.base import GitAdapter
@@ -14,6 +14,8 @@ from app.utils.config import Config
 
 from .extractor import _slugify
 from .schemas import FactEntity, FactEvent, FactGraph
+
+TEMPLATES_ROOT = Path(__file__).resolve().parent.parent / "templates" / "universe_scaffold"
 
 
 @dataclass(slots=True)
@@ -81,6 +83,90 @@ class ArchivistEngine:
         return f"{header}{story_content.strip()}\n"
 
 
+def _parse_front_matter(text: str) -> dict[str, str]:
+    match = re.match(r"^---\n(?P<body>.+?)\n---\n", text, flags=re.DOTALL)
+    if not match:
+        return {}
+    attributes: dict[str, str] = {}
+    for line in match.group("body").splitlines():
+        if ":" not in line:
+            continue
+        key, value = line.split(":", 1)
+        attributes[key.strip().lower()] = value.strip().strip('"')
+    return attributes
+
+
+def _parse_attribute_block(text: str) -> dict[str, str]:
+    attributes: dict[str, str] = {}
+    attribute_section = re.search(
+        r"(?im)^(?:##\s+)?(?:atributy|attributes)\s*:?.*$([\s\S]+)",
+        text,
+    )
+    if not attribute_section:
+        return attributes
+    for line in attribute_section.group(1).splitlines():
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#"):
+            continue
+        if ":" in stripped:
+            key, value = stripped.split(":", 1)
+            attributes[key.strip().lower()] = value.strip()
+    return attributes
+
+
+def _extract_core_truths(paths: Iterable[Path]) -> list[str]:
+    truths: list[str] = []
+    bullet_pattern = re.compile(r"^[\s>*-]*[-*+]\s+(?P<truth>.+)$")
+    for path in paths:
+        if not path.is_file():
+            continue
+        text = path.read_text(encoding="utf-8")
+        for line in text.splitlines():
+            match = bullet_pattern.match(line.strip())
+            if match:
+                truths.append(match.group("truth").strip())
+    return truths
+
+
+def _collect_truth_sources(repo_path: Path) -> list[Path]:
+    sources: list[Path] = []
+    core_truths_template = TEMPLATES_ROOT / "Legends" / "CORE_TRUTHS.md"
+    sources.append(core_truths_template)
+    legendy_dir = repo_path / "Legendy"
+    if legendy_dir.is_dir():
+        sources.extend(sorted(legendy_dir.glob("*.md")))
+    return sources
+
+
+def _timeline_candidates(repo_path: Path) -> list[Path]:
+    return [repo_path / "timeline.md", repo_path / "timeline.txt"]
+
+
+def _parse_timeline_events(text: str) -> list[FactEvent]:
+    events: list[FactEvent] = []
+    line_pattern = re.compile(
+        r"^(?P<date>(?:\d{3,4}(?:[\-/]\d{1,2}){0,2}|(?:jaro|léto|leto|podzim|zima|spring|summer|autumn|fall|winter)\s+\d{3,4}))?\s*(?:[-–—:]\s*)?(?P<title>.+)$",
+        flags=re.IGNORECASE,
+    )
+    for raw_line in text.splitlines():
+        stripped = raw_line.strip()
+        if not stripped or stripped.startswith("#"):
+            continue
+        match = line_pattern.match(stripped)
+        if not match:
+            continue
+        date = match.group("date")
+        title = match.group("title").strip()
+        events.append(
+            FactEvent(
+                id=_slugify(stripped),
+                title=title or stripped,
+                date=date.strip() if date else None,
+            )
+        )
+    return events
+
+
 def load_universe(repo_path: Path) -> FactGraph:
     """Parse the existing universe files into a :class:`FactGraph`."""
 
@@ -93,11 +179,13 @@ def load_universe(repo_path: Path) -> FactGraph:
             text = path.read_text(encoding="utf-8")
             titles = re.findall(r"^#\s*(.+)", text, flags=re.MULTILINE)
             entity_type = "place" if "place" in path.stem.lower() else "other"
+            attributes = {**_parse_front_matter(text), **_parse_attribute_block(text)}
             entities.append(
                 FactEntity(
                     id=_slugify(path.stem),
                     type=entity_type,
                     summary=titles[0] if titles else path.stem,
+                    attributes=attributes,
                 )
             )
 
@@ -106,26 +194,26 @@ def load_universe(repo_path: Path) -> FactGraph:
         for path in sorted(legendy_dir.glob("*.md")):
             text = path.read_text(encoding="utf-8")
             titles = re.findall(r"^#\s*(.+)", text, flags=re.MULTILINE)
+            attributes = {**_parse_front_matter(text), **_parse_attribute_block(text)}
             entities.append(
                 FactEntity(
                     id=_slugify(path.stem),
                     type="concept",
                     summary=titles[0] if titles else path.stem,
+                    attributes=attributes,
                 )
             )
 
-    for timeline in sorted(repo_path.glob("timeline.*")):
-        text = timeline.read_text(encoding="utf-8")
-        for line in text.splitlines():
-            if re.match(r"^\d", line.strip()):
-                events.append(
-                    FactEvent(
-                        id=_slugify(line),
-                        title=line.strip(),
-                    )
-                )
+    for timeline_path in _timeline_candidates(repo_path):
+        if not timeline_path.is_file():
+            continue
+        text = timeline_path.read_text(encoding="utf-8")
+        events.extend(_parse_timeline_events(text))
 
-    return FactGraph(entities=entities, events=events)
+    core_truth_sources = _collect_truth_sources(repo_path)
+    core_truths = _extract_core_truths(core_truth_sources)
+
+    return FactGraph(entities=entities, events=events, core_truths=core_truths)
 
 
 __all__ = ["ArchiveResult", "ArchivistEngine", "load_universe"]

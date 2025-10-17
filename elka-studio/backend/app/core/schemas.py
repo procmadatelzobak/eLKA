@@ -37,10 +37,14 @@ class FactEvent(BaseModel):
 
 
 class FactGraph(BaseModel):
-    """Container holding entities and events extracted from text."""
+    """Container holding entities, events, and shared lore context."""
 
     entities: List[FactEntity] = Field(default_factory=list)
     events: List[FactEvent] = Field(default_factory=list)
+    core_truths: List[str] = Field(
+        default_factory=list,
+        description="Canonical truths extracted from the universe legends.",
+    )
 
 
 class ConsistencyIssue(BaseModel):

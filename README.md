@@ -39,21 +39,35 @@ eLKA Studio is a full-stack application for building and managing fictional univ
 
 ## AI Providers
 - Backend používá deterministický **heuristic** adaptér, pokud není nastaven žádný API klíč. Jakmile definujete `GEMINI_API_KEY`,
-  proměnná `AI_PROVIDER=gemini` aktivuje dva klienty:
+  aktivují se dva klienti:
   - `AI_VALIDATOR_MODEL` (výchozí `gemini-2.5-pro`) analyzuje a ověřuje konzistenci příběhu.
   - `AI_WRITER_MODEL` (výchozí `gemini-2.5-flash`) generuje Markdown podklady pro časovou osu, entity a shrnutí.
 - V souboru `config.yml` můžete volitelně uložit `ai.gemini_api_key`, `ai.validator_model` a `ai.writer_model`. Proměnné prostředí mají vždy
   přednost a zamezí náhodnému zalogování tajných údajů.
 - Pokud API klíč chybí nebo je poskytovatel nastaven na `heuristic`, systém plynule přepne na deterministickou strategii a zachová kompatibilitu
   se stávajícími projekty.
-- Rychlé nastavení:
+- Rychlé nastavení prostředí i konfigurace:
   ```bash
   export GEMINI_API_KEY="your-secret"
-  export AI_PROVIDER="gemini"
-  export AI_VALIDATOR_MODEL="gemini-2.5-pro"
-  export AI_WRITER_MODEL="gemini-2.5-flash"
+
+  # config.yml
+  ai:
+    provider: "gemini"
+    validator_model: "gemini-2.5-pro"
+    writer_model: "gemini-2.5-flash"
   ```
 - Dokumentace API (`/docs`) nyní zmiňuje, že validace využívá Gemini 2.5 Pro a generování obsahu Gemini 2.5 Flash, pokud jsou tyto modely aktivní.
+
+## Universe Consistency Engine workflow
+- `POST /api/tasks/story/process` přijímá `{ project_id, story_text, apply? }`. Výchozí režim **DRY-RUN** provede extrakci faktů,
+  zvaliduje kontinuitu a uloží náhled diffu (včetně nových souborů `Objekty/<slug>.md` a změn v `timeline.md`) do výsledku úlohy.
+- Nastavte `apply: true`, chcete-li automaticky vytvořit větev `uce/<timestamp>-<slug>`, zapsat změny do repozitáře a provést commit.
+  Identifikátor commitu i větev se objeví v detailu tasku.
+- Aktualizace se deterministicky řadí: entity zachovávají stabilní identifikátory a časová osa používá normalizované klíče (včetně ročních období),
+  takže opakované spuštění se stejným příběhem neprodukuje duplicitní záznamy.
+- Když Gemini není k dispozici, heuristický adaptér stále vrací reprodukovatelný výstup – diff náhledu i commit budou konzistentní napříč běhy.
+- Rychlý lokální test: spusťte `pytest elka-studio/backend/tests/test_uce_pipeline.py` a ověřte kompletní průchod **DRY-RUN → APPLY → NO-OP**
+  na dočasném Git repozitáři.
 
 ## API Notes
 - When creating projects programmatically, send `name`, `git_url`, and (optionally) `git_token` in the request body to `/api/projects`. The API normalises GitHub zkrácený zápis `owner/repo` na plnou URL a vrací lidsky čitelné chyby pro neplatné vstupy.
