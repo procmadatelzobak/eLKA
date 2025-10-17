@@ -54,3 +54,21 @@ def test_update_task_status_broadcasts_pause(monkeypatch: pytest.MonkeyPatch, in
 
     assert updated.status == TaskStatus.PAUSED
     assert broadcast_calls == [task.project_id]
+
+
+def test_task_serialization_includes_payload() -> None:
+    """`Task.to_dict` exposes params and result payloads for the UI."""
+
+    task = Task(
+        project_id=5,
+        type="generate_story",
+        status=TaskStatus.SUCCESS,
+        params={"seed": "tajemná knihovna"},
+        result={"story": "Byl jednou jeden příběh", "files": {"Lore/story.md": "obsah"}},
+    )
+
+    payload = task.to_dict()
+
+    assert payload["params"] == {"seed": "tajemná knihovna"}
+    assert payload["result"]["story"].startswith("Byl jednou")
+    assert "Lore/story.md" in payload["result"]["files"]
