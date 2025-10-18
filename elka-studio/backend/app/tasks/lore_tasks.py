@@ -413,11 +413,38 @@ def generate_story_from_seed_task(
 
     try:
         project = app_context.git_manager.get_project_from_db(project_id)
+        project_path = app_context.git_manager.resolve_project_path(project)
+
         manager.update_task_status(
             celery_task_id,
             TaskStatus.RUNNING,
-            progress=20,
-            log_message=f"Loaded project '{project.name}'. Preparing AI adapter...",
+            progress=15,
+            log_message=f"Loaded project '{project.name}'. Gathering universe context...",
+        )
+
+        try:
+            current_graph = load_universe(project_path)
+            # Prepare a concise context summary for the prompt
+            context_summary = "Existing Universe Context:\n"
+            if current_graph.core_truths:
+                context_summary += "- Core Truths: " + "; ".join(current_graph.core_truths) + "\n"
+            # Optional: Add summaries of key entities or recent events if needed, be mindful of token limits
+            # Example (limit to 5 entities):
+            # if current_graph.entities:
+            #     context_summary += "- Key Entities: " + ", ".join([e.id for e in current_graph.entities[:5]]) + "\n"
+            # Example (limit to 5 events):
+            # if current_graph.events:
+            #     context_summary += "- Recent Events: " + ", ".join([e.title for e in current_graph.events[-5:]]) + "\n"
+
+        except Exception as e:
+            logger.warning(f"Could not load universe context for project {project_id}: {e}")
+            context_summary = "Could not load universe context.\n"
+
+        manager.update_task_status(
+            celery_task_id,
+            TaskStatus.RUNNING,
+            progress=25,
+            log_message="Universe context loaded. Preparing AI adapter...",
         )
 
         model_key = manager.config.get_model_key_for_task("generation")
@@ -428,7 +455,7 @@ def generate_story_from_seed_task(
         manager.update_task_status(
             celery_task_id,
             TaskStatus.RUNNING,
-            progress=35,
+            progress=40,
             log_message=(
                 f"Using AI adapter '{adapter_name}' with model key '{model_key}' "
                 f"(model: {model_name})."
@@ -440,6 +467,8 @@ def generate_story_from_seed_task(
             You are the lead chronicler for the {project_name} universe. Using the seed
             idea below, craft a cohesive Markdown story that honours existing canon.
 
+            {context_summary}
+
             Seed idea:
             {seed}
 
@@ -450,7 +479,11 @@ def generate_story_from_seed_task(
             - Return Markdown without code fences.
             """
         ).strip()
-        prompt = prompt_template.format(project_name=project.name, seed=seed.strip())
+        prompt = prompt_template.format(
+            project_name=project.name,
+            seed=seed.strip(),
+            context_summary=context_summary,
+        )
 
         generated_body = ""
         if hasattr(ai_adapter, "generate_text") and adapter_name != "heuristic":
@@ -461,7 +494,7 @@ def generate_story_from_seed_task(
         manager.update_task_status(
             celery_task_id,
             TaskStatus.RUNNING,
-            progress=55,
+            progress=60,
             log_message="Story drafted. Scheduling processing pipeline.",
             result={"story": story_content},
         )
