@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import re
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable, List, Optional, Set
@@ -64,8 +65,8 @@ class ValidatorEngine:
         steps: List[ValidationStep] = []
         for step_name in self._steps:
             analysis = self.ai_adapter.analyse(story_content, step_name)
-            passed = bool(analysis.get("passed", False))
-            messages = self._normalise_messages(analysis.get("messages", []))
+            passed, raw_messages = self._interpret_analysis_payload(analysis, step_name)
+            messages = self._normalise_messages(raw_messages)
             steps.append(ValidationStep(name=step_name, passed=passed, messages=messages))
         overall_passed = all(step.passed for step in steps)
         return ValidationReport(passed=overall_passed, steps=steps)
@@ -74,6 +75,55 @@ class ValidatorEngine:
     def _normalise_messages(messages: Iterable[str]) -> List[str]:
         normalised = [str(message).strip() for message in messages if str(message).strip()]
         return normalised or ["No issues detected."]
+
+    def _interpret_analysis_payload(
+        self, analysis: object, step_name: str
+    ) -> tuple[bool, Iterable[str]]:
+        """Coerce heterogeneous adapter responses into a bool/list tuple."""
+
+        if isinstance(analysis, Mapping):
+            passed = bool(analysis.get("passed", False))
+            messages = analysis.get("messages", [])
+            if isinstance(messages, Iterable) and not isinstance(messages, (str, bytes, bytearray)):
+                return passed, messages
+            return passed, [str(messages)]
+
+        if isinstance(analysis, str):
+            text = analysis.strip()
+            if not text:
+                return False, ["AI adapter returned an empty analysis response."]
+            try:
+                parsed = json.loads(text)
+            except json.JSONDecodeError:
+                return self._infer_pass_from_text(text), [text]
+            else:
+                return self._interpret_analysis_payload(parsed, step_name)
+
+        if isinstance(analysis, Sequence) and not isinstance(analysis, (bytes, bytearray, str)):
+            return False, analysis
+
+        if hasattr(analysis, "passed") and hasattr(analysis, "messages"):
+            passed = bool(getattr(analysis, "passed"))
+            messages = getattr(analysis, "messages")
+            if isinstance(messages, Iterable) and not isinstance(messages, (str, bytes, bytearray)):
+                return passed, messages
+            return passed, [str(messages)]
+
+        if analysis is None:
+            return False, [f"AI adapter returned no data for '{step_name}' validation."]
+
+        return bool(analysis), [str(analysis)]
+
+    @staticmethod
+    def _infer_pass_from_text(text: str) -> bool:
+        """Best-effort inference of pass/fail from free-form adapter responses."""
+
+        lowered = text.lower()
+        if any(keyword in lowered for keyword in ("fail", "error", "invalid")):
+            return False
+        if any(keyword in lowered for keyword in ("pass", "passed", "ok", "success")):
+            return True
+        return False
 
 
 def validate_universe(

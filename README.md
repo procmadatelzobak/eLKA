@@ -33,6 +33,7 @@ eLKA Studio is a full-stack application for building and managing fictional univ
   - `AI_WRITER_MODEL` (default `gemini-2.5-flash`) generates Markdown source material for timelines, entities, and summaries.
 - In `config.yml` you can optionally store `ai.gemini_api_key`, `ai.validator_model`, `ai.writer_model`, and aliases in `ai.models`. Environment variables always take precedence and prevent accidentally logging secrets.
 - If the API key is missing or the provider is set to `heuristic`, the system switches to the deterministic strategy and stays compatible with existing projects.
+- The validator now tolerates free-form responses coming from external AI providers. When a model returns plain text instead of structured JSON, the worker records the message and infers the pass/fail status, keeping the pipeline resilient even if the provider format drifts.
 - Quick environment and configuration setup:
   ```bash
   export GEMINI_API_KEY="your-secret"
