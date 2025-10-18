@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useParams } from 'react-router-dom';
 import TaskSocket from '../services/websocket';
-import { createTask, deleteTask, getProject, pauseTask, resumeTask } from '../services/api';
+import { createTask, deleteTask, fetchProject, pauseTask, resumeTask } from '../services/api';
 import './ProjectDashboardPage.css';
 
 const statusColors = {
@@ -21,6 +21,7 @@ const ProjectDashboardPage = () => {
   const { projectId } = useParams();
   const [tasks, setTasks] = useState([]);
   const [projectDetails, setProjectDetails] = useState(null);
+  const [projectName, setProjectName] = useState('');
   const [activeTab, setActiveTab] = useState('generate_story');
   const [seedValue, setSeedValue] = useState('');
   const [storyTitle, setStoryTitle] = useState('');
@@ -55,13 +56,15 @@ const ProjectDashboardPage = () => {
 
     const fetchProjectDetails = async () => {
       try {
-        const response = await getProject(projectId);
+        const data = await fetchProject(projectId);
         if (isMounted) {
-          setProjectDetails(response.data || null);
+          setProjectDetails(data || null);
+          setProjectName(typeof data?.name === 'string' ? data.name : '');
         }
       } catch (error) {
         if (isMounted) {
           setProjectDetails(null);
+          setProjectName('');
         }
       }
     };
@@ -108,7 +111,8 @@ const ProjectDashboardPage = () => {
     });
   }, [tasks]);
 
-  const projectName = projectDetails?.name ? projectDetails.name : `Project #${projectId}`;
+  const headingProjectName = projectName || projectDetails?.name || 'Loading…';
+  const resolvedProjectName = projectName || projectDetails?.name || `Project #${projectId}`;
   const estimatedTokens =
     typeof projectDetails?.estimated_context_tokens === 'number'
       ? projectDetails.estimated_context_tokens.toLocaleString('en-US')
@@ -183,10 +187,14 @@ const ProjectDashboardPage = () => {
     setPendingState(taskId, 'delete', true);
 
     try {
-      await deleteTask(taskId);
-      setTasks((previous) => previous.filter((task) => task.id !== taskId));
-      setExpandedTasks((previous) => previous.filter((id) => id !== taskId));
-      setTaskActionMessage('Task deleted successfully.');
+      const wasDeleted = await deleteTask(taskId);
+      if (wasDeleted) {
+        setTasks((previous) => previous.filter((task) => task.id !== taskId));
+        setExpandedTasks((previous) => previous.filter((id) => id !== taskId));
+        setTaskActionMessage(`Task ${taskId} deleted successfully.`);
+      } else {
+        setTaskActionError('Failed to delete the task.');
+      }
     } catch (error) {
       const detail = error.response?.data?.detail || 'Failed to delete the task.';
       setTaskActionError(detail);
@@ -234,10 +242,34 @@ const ProjectDashboardPage = () => {
     setFormError(null);
     setFormMessage(null);
 
+    const form = event.currentTarget;
+    const formData = new FormData(form);
+    const rawTitle = formData.get('storyTitle');
+    const rawAuthor = formData.get('storyAuthor');
+    const storyTitleValue = typeof rawTitle === 'string' ? rawTitle.trim() : '';
+    const storyAuthorValue = typeof rawAuthor === 'string' ? rawAuthor.trim() : '';
+
+    if (!storyTitleValue) {
+      setFormError('Please provide a story or saga title.');
+      return;
+    }
+
+    if (!storyAuthorValue) {
+      setFormError('Please provide an author name.');
+      return;
+    }
+
     const payload = {
       project_id: projectId,
       type,
-      params: {},
+      params: {
+        storyTitle: storyTitleValue,
+        storyAuthor: storyAuthorValue,
+        story_title: storyTitleValue,
+        story_author: storyAuthorValue,
+      },
+      storyTitle: storyTitleValue,
+      storyAuthor: storyAuthorValue,
     };
 
     if (type === 'generate_story') {
@@ -245,36 +277,14 @@ const ProjectDashboardPage = () => {
         setFormError('Please provide a seed value.');
         return;
       }
-      if (!storyTitle.trim()) {
-        setFormError('Please provide a story or saga title.');
-        return;
-      }
-      if (!storyAuthor.trim()) {
-        setFormError('Please provide an author name.');
-        return;
-      }
       const seed = seedValue.trim();
-      const title = storyTitle.trim();
-      const author = storyAuthor.trim();
       payload.seed = seed;
       payload.params.seed = seed;
-      payload.storyTitle = title;
-      payload.storyAuthor = author;
-      payload.params.storyTitle = title;
-      payload.params.storyAuthor = author;
     }
 
     if (type === 'generate_saga') {
       if (!sagaTheme.trim()) {
         setFormError('Please provide a saga theme.');
-        return;
-      }
-      if (!sagaTitle.trim()) {
-        setFormError('Please provide a story or saga title.');
-        return;
-      }
-      if (!sagaAuthor.trim()) {
-        setFormError('Please provide an author name.');
         return;
       }
 
@@ -285,16 +295,10 @@ const ProjectDashboardPage = () => {
       }
 
       const theme = sagaTheme.trim();
-      const title = sagaTitle.trim();
-      const author = sagaAuthor.trim();
       payload.theme = theme;
       payload.chapters = chapters;
       payload.params.theme = theme;
       payload.params.chapters = chapters;
-      payload.storyTitle = title;
-      payload.storyAuthor = author;
-      payload.params.storyTitle = title;
-      payload.params.storyAuthor = author;
     }
 
     setIsSubmitting(true);
@@ -357,9 +361,11 @@ const ProjectDashboardPage = () => {
     <div className="project-dashboard">
       <header className="project-dashboard__header">
         <div>
-          <h1>Project Dashboard</h1>
+          <h1>
+            Project: {headingProjectName} (ID: {projectId})
+          </h1>
           <p className="project-dashboard__subtitle">
-            Manage tasks for <strong>{projectName}</strong>, submit new requests, and monitor their progress in real time.
+            Manage tasks for <strong>{resolvedProjectName}</strong>, submit new requests, and monitor their progress in real time.
           </p>
           {estimatedTokens && (
             <p className="project-dashboard__meta">
@@ -418,27 +424,31 @@ const ProjectDashboardPage = () => {
                     handleSubmit(event, 'generate_story')
                   }
                 >
-                  <label className="task-form__label" htmlFor="story-title">
+                  <label className="task-form__label" htmlFor="storyTitle">
                     Story/Saga Title
                   </label>
                   <input
-                    id="story-title"
+                    id="storyTitle"
                     type="text"
+                    name="storyTitle"
                     className="task-form__input"
                     value={storyTitle}
                     onChange={(event) => setStoryTitle(event.target.value)}
                     placeholder="e.g. Chronicles of Avalon"
+                    required
                   />
-                  <label className="task-form__label" htmlFor="story-author">
+                  <label className="task-form__label" htmlFor="storyAuthor">
                     Author
                   </label>
                   <input
-                    id="story-author"
+                    id="storyAuthor"
                     type="text"
+                    name="storyAuthor"
                     className="task-form__input"
                     value={storyAuthor}
                     onChange={(event) => setStoryAuthor(event.target.value)}
                     placeholder="e.g. eLKA User"
+                    required
                   />
                   <label className="task-form__label" htmlFor="seed-value">
                     Seed
@@ -446,6 +456,7 @@ const ProjectDashboardPage = () => {
                   <input
                     id="seed-value"
                     type="text"
+                    name="seed"
                     className="task-form__input"
                     value={seedValue}
                     onChange={(event) => setSeedValue(event.target.value)}
@@ -478,27 +489,31 @@ const ProjectDashboardPage = () => {
 
               {activeTab === 'generate_saga' && (
                 <form className="task-form" onSubmit={(event) => handleSubmit(event, 'generate_saga')}>
-                  <label className="task-form__label" htmlFor="saga-title">
+                  <label className="task-form__label" htmlFor="storyTitle">
                     Story/Saga Title
                   </label>
                   <input
-                    id="saga-title"
+                    id="storyTitle"
                     type="text"
+                    name="storyTitle"
                     className="task-form__input"
                     value={sagaTitle}
                     onChange={(event) => setSagaTitle(event.target.value)}
                     placeholder="e.g. Rise of the Machine Empire"
+                    required
                   />
-                  <label className="task-form__label" htmlFor="saga-author">
+                  <label className="task-form__label" htmlFor="storyAuthor">
                     Author
                   </label>
                   <input
-                    id="saga-author"
+                    id="storyAuthor"
                     type="text"
+                    name="storyAuthor"
                     className="task-form__input"
                     value={sagaAuthor}
                     onChange={(event) => setSagaAuthor(event.target.value)}
                     placeholder="e.g. eLKA User"
+                    required
                   />
                   <label className="task-form__label" htmlFor="saga-theme">
                     Saga theme
@@ -506,6 +521,7 @@ const ProjectDashboardPage = () => {
                   <input
                     id="saga-theme"
                     type="text"
+                    name="theme"
                     className="task-form__input"
                     value={sagaTheme}
                     onChange={(event) => setSagaTheme(event.target.value)}
@@ -518,6 +534,7 @@ const ProjectDashboardPage = () => {
                     id="saga-chapters"
                     type="number"
                     min="1"
+                    name="chapters"
                     className="task-form__input"
                     value={sagaChapters}
                     onChange={(event) => setSagaChapters(event.target.value)}

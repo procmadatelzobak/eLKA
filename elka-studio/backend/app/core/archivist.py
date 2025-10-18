@@ -62,21 +62,31 @@ class ArchivistEngine:
 
         summary = self.ai_adapter.summarise(story_content)
 
+        target_path = story_file_path
+        if not isinstance(target_path, Path):
+            target_path = Path(target_path)
+        absolute_path = target_path if target_path.is_absolute() else self.project_path / target_path
+
         try:
-            absolute_path = story_file_path
-            if not story_file_path.is_absolute():
-                absolute_path = self.project_path / story_file_path
             absolute_path.parent.mkdir(parents=True, exist_ok=True)
             absolute_path.write_text(story_content, encoding="utf-8")
             logger.info("Story file saved: %s", absolute_path)
         except OSError as exc:
-            logger.error("Failed to write story file %s: %s", story_file_path, exc)
-            fallback_directory = (
-                self.config.story_directory
-                if isinstance(self.config.story_directory, Path)
-                else Path(self.config.story_directory)
-            )
-            absolute_path = self.project_path / fallback_directory / "story.md"
+            logger.error("Failed to write story file %s: %s", absolute_path, exc)
+            fallback_directory = self.config.ensure_story_directory(self.project_path)
+            fallback_name = target_path.stem or "story"
+            fallback_path = fallback_directory / self.config.story_filename(fallback_name)
+            try:
+                fallback_path.write_text(story_content, encoding="utf-8")
+                logger.info("Story file saved to fallback path: %s", fallback_path)
+                absolute_path = fallback_path
+            except OSError as fallback_exc:
+                logger.error(
+                    "Fallback write failed for story file %s: %s",
+                    fallback_path,
+                    fallback_exc,
+                )
+                raise
 
         try:
             relative_path_obj = absolute_path.relative_to(self.project_path)

@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from typing import Any, List
+import logging
+from typing import Any, Dict, List
 
 from fastapi import APIRouter, Depends, HTTPException, Response, status
 from pydantic import BaseModel, Field
@@ -14,6 +15,8 @@ from ..services.task_manager import TaskManager
 
 router = APIRouter(prefix="/tasks", tags=["tasks"])
 
+logger = logging.getLogger(__name__)
+
 task_manager = TaskManager()
 
 
@@ -22,7 +25,7 @@ class TaskCreateRequest(BaseModel):
 
     project_id: int
     task_type: str = Field(..., alias="type")
-    params: dict[str, Any] = Field(default_factory=dict, description="Additional task parameters")
+    params: Dict[str, Any] = Field(default_factory=dict, description="Additional task parameters")
     seed: str | None = Field(default=None, description="Story seed for generation tasks")
     theme: str | None = Field(default=None, description="Saga theme for orchestration tasks")
     chapters: int | None = Field(
@@ -153,9 +156,18 @@ def delete_task(task_id: int, session: Session = Depends(get_session)) -> Respon
     task = session.query(Task).filter(Task.id == task_id).one_or_none()
     if task is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Task not found")
-    session.delete(task)
-    session.commit()
-    task_manager.broadcast_update(task.project_id)
+    project_id = task.project_id
+    try:
+        session.delete(task)
+        session.commit()
+    except Exception as exc:  # pragma: no cover - defensive logging
+        session.rollback()
+        logger.error("Failed to delete task %s: %s", task_id, exc)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to delete task",
+        ) from exc
+    task_manager.broadcast_update(project_id)
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 

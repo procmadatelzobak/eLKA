@@ -6,7 +6,7 @@ import difflib
 import json
 import os
 import time
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from textwrap import dedent
 
@@ -62,10 +62,10 @@ def _build_story_document(
     if not body.endswith("\n"):
         body = f"{body}\n"
 
-    timestamp = datetime.utcnow()
-    generated_at = timestamp.replace(microsecond=0).isoformat() + "Z"
+    timestamp_utc = datetime.now(timezone.utc).replace(microsecond=0)
+    generated_at = timestamp_utc.isoformat().replace("+00:00", "Z")
     sanitized_title = sanitize_filename(resolved_title, default="story")
-    story_filename = f"{sanitized_title}-{timestamp.strftime('%Y%m%d-%H%M%S')}.md"
+    story_filename = f"{sanitized_title}-{timestamp_utc.strftime('%Y%m%d-%H%M%S')}.md"
     relative_path = Path("stories") / story_filename
     front_matter_lines = [
         "---",
@@ -135,7 +135,17 @@ def _wait_while_paused(task_db_id: int, interval_seconds: int = 30) -> None:
 
 
 def _load_full_universe_context(project_path: Path, project_id: int) -> str:
-    include_dirs = ["Objekty", "Legendy", "Pokyny", "Příběhy"]
+    include_dirs = [
+        "Stories",
+        "Legends",
+        "Instructions",
+        "Objects",
+        "Příběhy",
+        "Legendy",
+        "Pokyny",
+        "Objekty",
+    ]
+    include_dirs = list(dict.fromkeys(include_dirs))
     include_files = ["timeline.txt", "timeline.md", "README.txt", "README.md"]
 
     env_dirs = os.getenv("ELKA_UNIVERSE_CONTEXT_DIRS")
