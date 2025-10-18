@@ -8,3 +8,5 @@ redis
 sqlalchemy
 uvicorn[standard]
 google-genai>=0.3.0
+
+google-generativeai
