@@ -60,18 +60,12 @@ def create_task(payload: TaskCreateRequest) -> dict:
     if payload.chapters is not None:
         params.setdefault("chapters", payload.chapters)
 
-    if payload.task_type in {"process_story", "process_story_task"}:
-        story_content = params.get("story_content")
-        if not isinstance(story_content, str) or not story_content.strip():
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="story_content must be a non-empty string",
-            )
-        params["story_content"] = story_content
-    elif payload.task_type in {
+    if payload.task_type in {
         "generate_story",
         "generate_story_from_seed",
         "generate_story_from_seed_task",
+        "generate_and_process_story_from_seed",
+        "generate_and_process_story_from_seed_task",
     }:
         seed = params.get("seed")
         if not isinstance(seed, str) or not seed.strip():

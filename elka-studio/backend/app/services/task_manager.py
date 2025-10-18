@@ -143,13 +143,13 @@ class TaskManager:
         task_map = {
             "dummy": "app.tasks.dummy_task",
             "dummy_task": "app.tasks.dummy_task",
-            "process_story": "app.tasks.lore_tasks.process_story_task",
-            "process_story_task": "app.tasks.lore_tasks.process_story_task",
             "uce_process_story": "app.tasks.lore_tasks.uce_process_story_task",
             "uce_process_story_task": "app.tasks.lore_tasks.uce_process_story_task",
-            "generate_story": "app.tasks.lore_tasks.generate_story_from_seed_task",
-            "generate_story_from_seed": "app.tasks.lore_tasks.generate_story_from_seed_task",
-            "generate_story_from_seed_task": "app.tasks.lore_tasks.generate_story_from_seed_task",
+            "generate_story": "app.tasks.lore_tasks.generate_and_process_story_from_seed_task",
+            "generate_story_from_seed": "app.tasks.lore_tasks.generate_and_process_story_from_seed_task",
+            "generate_story_from_seed_task": "app.tasks.lore_tasks.generate_and_process_story_from_seed_task",
+            "generate_and_process_story_from_seed": "app.tasks.lore_tasks.generate_and_process_story_from_seed_task",
+            "generate_and_process_story_from_seed_task": "app.tasks.lore_tasks.generate_and_process_story_from_seed_task",
             "generate_saga": "app.tasks.lore_tasks.generate_saga_task",
             "generate_saga_task": "app.tasks.lore_tasks.generate_saga_task",
         }

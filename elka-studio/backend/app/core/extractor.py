@@ -73,23 +73,28 @@ Return an object with exactly two keys: "entities" and "events".
 - "events": array of objects with keys {"id", "title", "date", "location", "participants", "description"}.
 Match the field names exactly. Use slug-style identifiers (lowercase, underscore).
 Do not include markdown, code fences, explanations, or trailing text.
-Story follows between <story> markers.
+Story follows between <story> markers. When <context> is present, ensure the
+extracted facts align with that lore and prefer identifiers already used in the
+context.
 """.strip()
 
 
-def _build_request_payload(story: str) -> str:
-    return (
-        STRICT_FACT_GRAPH_TEMPLATE
-        + "\n<story>\n"
-        + story.strip()
-        + "\n</story>"
-    )
+def _build_request_payload(story: str, context: str | None = None) -> str:
+    payload = STRICT_FACT_GRAPH_TEMPLATE
+    if context and context.strip():
+        payload += "\n<context>\n" + context.strip() + "\n</context>"
+    payload += "\n<story>\n" + story.strip() + "\n</story>"
+    return payload
 
 
-def extract_fact_graph(story: str, ai: BaseAIAdapter) -> FactGraph:
+def extract_fact_graph(
+    story: str,
+    ai: BaseAIAdapter,
+    context: str | None = None,
+) -> FactGraph:
     """Use the AI adapter to convert a story into a :class:`FactGraph`."""
 
-    base_prompt = _build_request_payload(story)
+    base_prompt = _build_request_payload(story, context=context)
     prompts = [base_prompt]
 
     last_error: Exception | None = None
@@ -108,7 +113,7 @@ def extract_fact_graph(story: str, ai: BaseAIAdapter) -> FactGraph:
                 last_error = exc
                 continue
         else:
-            result = ai.analyse(prompt, aspect="extraction")
+            result = ai.analyse(prompt, aspect="extraction", context=context)
 
         try:
             if isinstance(result, dict):
@@ -156,10 +161,14 @@ def _map_entity_type(raw_type: str) -> EntityType:
     return EntityType.OTHER
 
 
-def extract_story_entities(story: str, ai: BaseAIAdapter) -> ExtractedData:
+def extract_story_entities(
+    story: str,
+    ai: BaseAIAdapter,
+    universe_context: str | None = None,
+) -> ExtractedData:
     """Extract structured entity data suitable for archival."""
 
-    fact_graph = extract_fact_graph(story, ai)
+    fact_graph = extract_fact_graph(story, ai, context=universe_context)
     data = ExtractedData()
 
     for entity in fact_graph.entities:

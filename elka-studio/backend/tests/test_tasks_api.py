@@ -61,7 +61,7 @@ def test_task_serialization_includes_payload() -> None:
 
     task = Task(
         project_id=5,
-        type="generate_story",
+        type="generate_and_process_story_from_seed",
         status=TaskStatus.SUCCESS,
         params={"seed": "tajemná knihovna"},
         result={"story": "Byl jednou jeden příběh", "files": {"Lore/story.md": "obsah"}},

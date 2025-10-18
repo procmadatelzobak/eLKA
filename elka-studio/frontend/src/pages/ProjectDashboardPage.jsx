@@ -20,8 +20,7 @@ const taskActionMessages = {
 const ProjectDashboardPage = () => {
   const { projectId } = useParams();
   const [tasks, setTasks] = useState([]);
-  const [activeTab, setActiveTab] = useState('process_story');
-  const [storyContent, setStoryContent] = useState('');
+  const [activeTab, setActiveTab] = useState('generate_and_process_story_from_seed');
   const [seedValue, setSeedValue] = useState('');
   const [sagaTheme, setSagaTheme] = useState('');
   const [sagaChapters, setSagaChapters] = useState(3);
@@ -183,16 +182,7 @@ const ProjectDashboardPage = () => {
       params: {},
     };
 
-    if (type === 'process_story') {
-      if (!storyContent.trim()) {
-        setFormError('Nejprve vložte text příběhu.');
-        return;
-      }
-      const content = storyContent.trim();
-      payload.params.story_content = content;
-    }
-
-    if (type === 'generate_story') {
+    if (type === 'generate_and_process_story_from_seed') {
       if (!seedValue.trim()) {
         setFormError('Zadejte seed pro generování.');
         return;
@@ -227,9 +217,7 @@ const ProjectDashboardPage = () => {
       await createTask(payload);
       setFormMessage('Úloha byla úspěšně odeslána agentovi eLKA.');
 
-      if (type === 'process_story') {
-        setStoryContent('');
-      } else if (type === 'generate_story') {
+      if (type === 'generate_and_process_story_from_seed') {
         setSeedValue('');
       } else {
         setSagaTheme('');
@@ -262,20 +250,15 @@ const ProjectDashboardPage = () => {
               <button
                 type="button"
                 role="tab"
-                aria-selected={activeTab === 'process_story'}
-                className={`task-forms__tab ${activeTab === 'process_story' ? 'task-forms__tab--active' : ''}`}
-                onClick={() => setActiveTab('process_story')}
+                aria-selected={activeTab === 'generate_and_process_story_from_seed'}
+                className={`task-forms__tab ${
+                  activeTab === 'generate_and_process_story_from_seed'
+                    ? 'task-forms__tab--active'
+                    : ''
+                }`}
+                onClick={() => setActiveTab('generate_and_process_story_from_seed')}
               >
-                Zpracovat příběh
-              </button>
-              <button
-                type="button"
-                role="tab"
-                aria-selected={activeTab === 'generate_story'}
-                className={`task-forms__tab ${activeTab === 'generate_story' ? 'task-forms__tab--active' : ''}`}
-                onClick={() => setActiveTab('generate_story')}
-              >
-                Vygenerovat z seed
+                Vygenerovat a zpracovat
               </button>
               <button
                 type="button"
@@ -292,27 +275,13 @@ const ProjectDashboardPage = () => {
               {formError && <div className="task-forms__alert task-forms__alert--error">{formError}</div>}
               {formMessage && <div className="task-forms__alert task-forms__alert--success">{formMessage}</div>}
 
-              {activeTab === 'process_story' && (
-                <form className="task-form" onSubmit={(event) => handleSubmit(event, 'process_story')}>
-                  <label className="task-form__label" htmlFor="story-content">
-                    Příběh ke zpracování
-                  </label>
-                  <textarea
-                    id="story-content"
-                    className="task-form__textarea"
-                    value={storyContent}
-                    onChange={(event) => setStoryContent(event.target.value)}
-                    rows={10}
-                    placeholder="Vložte text příběhu, který má eLKA analyzovat nebo rozšířit."
-                  />
-                  <button type="submit" className="task-form__submit" disabled={isSubmitting}>
-                    {isSubmitting ? 'Odesílám…' : 'Odeslat'}
-                  </button>
-                </form>
-              )}
-
-              {activeTab === 'generate_story' && (
-                <form className="task-form" onSubmit={(event) => handleSubmit(event, 'generate_story')}>
+              {activeTab === 'generate_and_process_story_from_seed' && (
+                <form
+                  className="task-form"
+                  onSubmit={(event) =>
+                    handleSubmit(event, 'generate_and_process_story_from_seed')
+                  }
+                >
                   <label className="task-form__label" htmlFor="seed-value">
                     Seed
                   </label>

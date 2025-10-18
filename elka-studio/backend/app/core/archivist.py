@@ -54,14 +54,14 @@ class ArchivistEngine:
     def archive(
         self,
         story_content: str,
-        universe_files: dict[str, str] | None = None,
+        universe_context: str | None = None,
     ) -> ArchiveResult:
         """Return the files to be committed and relevant metadata.
 
-        The ``universe_files`` argument is accepted to support future
-        contextual archival strategies.  The current implementation focuses on
-        the generated story alone, but Celery tasks can already provide the
-        additional information.
+        ``universe_context`` carries the raw text of the universe files that
+        were supplied during validation. When entity extraction supports the
+        additional context it can reuse the data to prefer canonical
+        identifiers and maintain consistency across archives.
         """
 
         summary = self.ai_adapter.summarise(story_content)
@@ -84,7 +84,11 @@ class ArchivistEngine:
         extracted_files = {}
         extracted_data: Optional[ExtractedData] = None
         try:
-            extracted_data = extract_story_entities(story_content, self.ai_adapter)
+            extracted_data = extract_story_entities(
+                story_content,
+                self.ai_adapter,
+                universe_context=universe_context,
+            )
         except Exception as exc:  # pragma: no cover - defensive logging
             logger.error("Failed to extract entities from story: %s", exc)
 
@@ -105,6 +109,8 @@ class ArchivistEngine:
                 log_messages.append(
                     f"Archived {len(extracted_files)} extracted entity files."
                 )
+            timeline_messages = self._update_timeline(extracted_data.events)
+            log_messages.extend(timeline_messages)
 
         return ArchiveResult(success=True, files=files, metadata=metadata, log_messages=log_messages)
 
@@ -271,6 +277,91 @@ class ArchivistEngine:
 
         content = "\n".join(lines).strip() + "\n"
         return content
+
+    def _update_timeline(self, events: List[ExtractedEvent]) -> List[str]:
+        """Append extracted events to the project timeline when available."""
+
+        if not events:
+            return []
+
+        candidates = _timeline_candidates(self.project_path)
+        timeline_path: Path | None = None
+        for candidate in candidates:
+            if candidate.exists():
+                timeline_path = candidate
+                break
+        if timeline_path is None:
+            # Default to a plain-text timeline when none exists yet.
+            timeline_path = self.project_path / "timeline.txt"
+
+        try:
+            existing_text = (
+                timeline_path.read_text(encoding="utf-8")
+                if timeline_path.exists()
+                else ""
+            )
+        except OSError as exc:  # pragma: no cover - filesystem interaction
+            logger.error("Failed to read timeline %s: %s", timeline_path, exc)
+            existing_text = ""
+
+        existing_lower = existing_text.lower()
+        new_entries: list[str] = []
+        for event in events:
+            event_id = (event.id or event.name or "").strip()
+            if not event_id:
+                continue
+            marker = f"[{event_id}]".lower()
+            if marker and marker in existing_lower:
+                logger.debug("Timeline already contains event %s; skipping.", event_id)
+                continue
+
+            title = event.name or event_id.replace("_", " ").title()
+            if event.date:
+                title = f"{event.date} – {title}"
+
+            descriptors: list[str] = []
+            summary = (event.description or event.summary or "").strip()
+            if summary:
+                descriptors.append(summary)
+            if event.location:
+                descriptors.append(f"Location: {event.location}")
+            participants = ", ".join(
+                sorted({participant for participant in event.participants if participant})
+            )
+            if participants:
+                descriptors.append(f"Participants: {participants}")
+
+            descriptor_text = f" — {'; '.join(descriptors)}" if descriptors else ""
+            entry = f"- [{event_id}] {title}{descriptor_text}"
+            new_entries.append(entry)
+
+        if not new_entries:
+            return []
+
+        append_lines: list[str] = []
+        if not existing_text.strip():
+            append_lines.append("# Timeline")
+            append_lines.append("")
+        elif not existing_text.endswith("\n"):
+            append_lines.append("")
+
+        append_lines.extend(new_entries)
+        text_to_append = "\n".join(append_lines)
+        if not text_to_append.endswith("\n"):
+            text_to_append += "\n"
+
+        try:
+            timeline_path.parent.mkdir(parents=True, exist_ok=True)
+            with timeline_path.open("a", encoding="utf-8") as handle:
+                handle.write(text_to_append)
+        except OSError as exc:  # pragma: no cover - filesystem interaction
+            logger.error("Failed to update timeline %s: %s", timeline_path, exc)
+            return []
+
+        relative_path = timeline_path.relative_to(self.project_path)
+        message = f"Timeline updated with {len(new_entries)} event(s) in {relative_path}."
+        logger.info(message)
+        return [message]
 
     @staticmethod
     def _render_event_content(event: Optional[ExtractedEvent]) -> str:

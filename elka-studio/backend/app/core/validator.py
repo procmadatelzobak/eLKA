@@ -52,19 +52,23 @@ class ValidatorEngine:
     def validate(
         self,
         story_content: str,
-        universe_files: dict[str, str] | None = None,
+        universe_context: str | None = None,
     ) -> ValidationReport:
         """Run all validation steps and return a structured report.
 
-        ``universe_files`` is accepted for future contextual validation
-        strategies. The current heuristic adapter does not require it, but we
-        keep the signature so workers can provide additional context without
-        altering their call sites later.
+        ``universe_context`` contains a pre-loaded string representation of the
+        relevant lore files. When an AI adapter supports contextual analysis it
+        receives the string alongside the story, ensuring validation decisions
+        incorporate the full canon without altering heuristic fallbacks.
         """
 
         steps: List[ValidationStep] = []
         for step_name in self._steps:
-            analysis = self.ai_adapter.analyse(story_content, step_name)
+            analysis = self.ai_adapter.analyse(
+                story_content,
+                step_name,
+                context=universe_context,
+            )
             passed, raw_messages = self._interpret_analysis_payload(analysis, step_name)
             messages = self._normalise_messages(raw_messages)
             steps.append(ValidationStep(name=step_name, passed=passed, messages=messages))

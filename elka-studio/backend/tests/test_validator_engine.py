@@ -28,7 +28,12 @@ class DummyAdapter(BaseAIAdapter):
             self._responses = [""]
         self._index = 0
 
-    def analyse(self, story_content: str, aspect: str):  # type: ignore[override]
+    def analyse(
+        self,
+        story_content: str,
+        aspect: str,
+        context: str | None = None,
+    ):  # type: ignore[override]
         index = min(self._index, len(self._responses) - 1)
         self._index += 1
         return self._responses[index]

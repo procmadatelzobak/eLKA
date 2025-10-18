@@ -42,8 +42,27 @@ class GeminiAdapter(BaseAIAdapter):
         response = self._client.models.generate_content(model=model_name, contents=prompt)
         return getattr(response, "text", "")
 
-    def analyse(self, prompt: str, aspect: str = "generic") -> Dict[str, object] | str:  # type: ignore[override]
+    def analyse(
+        self,
+        story_content: str,
+        aspect: str = "generic",
+        context: str | None = None,
+    ) -> Dict[str, object] | str:  # type: ignore[override]
         """Call the configured Gemini model for analytical tasks."""
+
+        if context:
+            prompt = (
+                "You are evaluating a story for consistency with the provided universe context.\n"
+                f"ASPECT: {aspect}\n"
+                "--- BEGIN CONTEXT ---\n"
+                f"{context}\n"
+                "--- END CONTEXT ---\n"
+                "--- BEGIN STORY ---\n"
+                f"{story_content}\n"
+                "--- END STORY ---"
+            )
+        else:
+            prompt = story_content
 
         response = self._client.models.generate_content(model=self._resolve_model(), contents=prompt)
         return getattr(response, "text", str(response))
