@@ -14,6 +14,7 @@ from app.db.session import SessionLocal
 from app.models.project import Project
 from app.models.task import Task, TaskStatus
 from app.core.context import app_context
+from app.services.ai_adapter_factory import AIAdapterFactory
 
 
 class TaskManager:
@@ -22,6 +23,8 @@ class TaskManager:
     def __init__(self, session_factory: Callable[[], Session] = SessionLocal) -> None:
         self._session_factory = session_factory
         self._redis_client = get_redis_client()
+        self.config = app_context.config
+        self.ai_adapter_factory = AIAdapterFactory(self.config)
 
     def create_task(self, project_id: int, task_type: str, params: dict | None = None) -> Task:
         """Create a task record and dispatch the corresponding Celery job."""

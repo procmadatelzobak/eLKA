@@ -38,6 +38,16 @@ ai:
   # Existing clients relying on ai.model for metadata continue to work.
   model: "heuristic-v1"
 
+tasks:
+  generation:
+    model: "gemini-flash"
+  extraction:
+    model: "gemini-flash"
+  validation:
+    model: "gemini-pro"
+  planning:
+    model: "gemini-pro"
+
 stories:
   directory: "stories"
   extension: ".md"

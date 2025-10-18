@@ -153,6 +153,60 @@ class Config:
             return str(value).strip()
         return "gemini-2.5-flash"
 
+    def get_ai_model_aliases(self) -> Dict[str, str]:
+        """Return mapping of logical model keys to provider-specific names."""
+
+        ai_config = self.data.get("ai", {})
+        models = ai_config.get("models", {})
+        if not isinstance(models, dict):
+            return {}
+        return {str(key): str(value) for key, value in models.items()}
+
+    def resolve_model_name(self, model_key: str) -> str:
+        """Translate a model key (e.g. ``gemini-pro``) to a provider model name."""
+
+        if not model_key:
+            return model_key
+        aliases = self.get_ai_model_aliases()
+        return aliases.get(model_key, model_key)
+
+    def get_default_adapter(self) -> str:
+        """Return the default AI adapter name derived from configuration."""
+
+        provider = self.ai_provider()
+        return provider or "heuristic"
+
+    def get_model_key_for_task(self, task_type: str) -> str:
+        """Return the configured model key for the given task type."""
+
+        tasks_config = self.data.get("tasks", {})
+        if isinstance(tasks_config, dict):
+            task_settings = tasks_config.get(task_type, {})
+            if isinstance(task_settings, dict):
+                model_key = str(task_settings.get("model", "")).strip()
+                if model_key:
+                    return model_key
+
+        provider = self.ai_provider()
+        if provider != "gemini":
+            return "heuristic"
+
+        defaults = {
+            "generation": "gemini-flash",
+            "extraction": "gemini-flash",
+            "validation": "gemini-pro",
+            "planning": "gemini-pro",
+        }
+        return defaults.get(task_type, "gemini-pro")
+
+    def get_model_name_for_task(self, task_type: str) -> str:
+        """Return the provider-specific model name for a given task type."""
+
+        model_key = self.get_model_key_for_task(task_type)
+        if model_key == "heuristic":
+            return "heuristic"
+        return self.resolve_model_name(model_key)
+
     def ai_provider(self) -> str:
         """Return the active AI provider, defaulting to heuristic fallback."""
 

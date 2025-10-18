@@ -41,27 +41,31 @@ def _generate_metadata_block(project: Project, seed: str) -> str:
     return "\n".join(lines)
 
 
-def _write_story(seed: str, project: Project) -> str:
+def _write_story(seed: str, project: Project, generated_body: str | None = None) -> str:
     metadata = _generate_metadata_block(project, seed)
-    premise = seed.strip() or "An unexpected development in the eLKA universe."
-    paragraphs = dedent(
-        f"""
-        ## Opening
-        The saga opens on the central theme: {premise}. The tone mirrors the established
-        chronicles of {project.name}, weaving familiar motifs with fresh tensions.
+    body = (generated_body or "").strip()
+    if not body:
+        premise = seed.strip() or "An unexpected development in the eLKA universe."
+        body = dedent(
+            f"""
+            ## Opening
+            The saga opens on the central theme: {premise}. The tone mirrors the established
+            chronicles of {project.name}, weaving familiar motifs with fresh tensions.
 
-        ## Rising Action
-        Characters evolve as they respond to the call of the seed. Relationships shift,
-        secrets surface, and the lore of {project.name} deepens through new dilemmas
-        sparked by the guiding idea.
+            ## Rising Action
+            Characters evolve as they respond to the call of the seed. Relationships shift,
+            secrets surface, and the lore of {project.name} deepens through new dilemmas
+            sparked by the guiding idea.
 
-        ## Resolution
-        The story concludes with consequences that matter to the wider canon. Threads
-        remain for future tales, while the immediate conflict finds closure that feels
-        authentic to the universe.
-        """
-    ).strip()
-    return f"{metadata}{paragraphs}\n"
+            ## Resolution
+            The story concludes with consequences that matter to the wider canon. Threads
+            remain for future tales, while the immediate conflict finds closure that feels
+            authentic to the universe.
+            """
+        ).strip()
+    if not body.endswith("\n"):
+        body = f"{body}\n"
+    return f"{metadata}{body}"
 
 
 def _plan_saga(theme: str, chapters: int) -> list[dict[str, str]]:
@@ -413,10 +417,46 @@ def generate_story_from_seed_task(
             celery_task_id,
             TaskStatus.RUNNING,
             progress=20,
-            log_message=f"Generating draft for project '{project.name}'.",
+            log_message=f"Loaded project '{project.name}'. Preparing AI adapter...",
         )
 
-        story_content = _write_story(seed, project)
+        model_key = manager.config.get_model_key_for_task("generation")
+        model_name = manager.config.get_model_name_for_task("generation")
+        adapter_name = "heuristic" if model_key == "heuristic" else manager.config.get_default_adapter()
+        ai_adapter = manager.ai_adapter_factory.get_adapter(adapter_name, model_key=model_key)
+
+        manager.update_task_status(
+            celery_task_id,
+            TaskStatus.RUNNING,
+            progress=35,
+            log_message=(
+                f"Using AI adapter '{adapter_name}' with model key '{model_key}' "
+                f"(model: {model_name})."
+            ),
+        )
+
+        prompt_template = dedent(
+            """
+            You are the lead chronicler for the {project_name} universe. Using the seed
+            idea below, craft a cohesive Markdown story that honours existing canon.
+
+            Seed idea:
+            {seed}
+
+            Requirements:
+            - Write 3-4 paragraphs with natural flow (no headings unless necessary).
+            - Keep tone consistent with previous chronicles of {project_name}.
+            - Mention at least one established character or location if applicable.
+            - Return Markdown without code fences.
+            """
+        ).strip()
+        prompt = prompt_template.format(project_name=project.name, seed=seed.strip())
+
+        generated_body = ""
+        if hasattr(ai_adapter, "generate_text") and adapter_name != "heuristic":
+            generated_body = ai_adapter.generate_text(prompt, model_key=model_key).strip()
+
+        story_content = _write_story(seed, project, generated_body=generated_body)
 
         manager.update_task_status(
             celery_task_id,

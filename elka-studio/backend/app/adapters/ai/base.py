@@ -125,6 +125,12 @@ class HeuristicAIAdapter(BaseAIAdapter):
         payload = {"system": system.strip(), "user": user.strip()}
         return json.dumps(payload)
 
+    def generate_text(self, prompt: str, model_key: str | None = None) -> str:
+        """Return a deterministic text response for the provided prompt."""
+
+        cleaned = prompt.strip()
+        return cleaned or ""
+
 
 def get_default_ai_adapter(config: Config) -> BaseAIAdapter:
     """Factory returning the default AI adapter used by workers."""
