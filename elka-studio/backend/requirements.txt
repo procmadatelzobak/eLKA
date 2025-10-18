@@ -5,6 +5,7 @@ GitPython
 python-dotenv
 pyyaml
 redis
+limits
 sqlalchemy
 uvicorn[standard]
 google-genai>=0.3.0
