@@ -405,8 +405,16 @@ def generate_story_from_seed_task(
 
         full_context_string = _load_full_universe_context(project_path, project_id)
 
-        model_key = manager.config.get_model_key_for_task("generation")
-        model_name = manager.config.get_model_name_for_task("generation")
+        try:
+            model_key = manager.config.get_model_key_for_task("seed_generation")
+            model_name = manager.config.get_model_name_for_task("seed_generation")
+            logger.info("Using specific model configured for 'seed_generation'.")
+        except KeyError:
+            logger.info(
+                "No specific model for 'seed_generation', using default 'generation' model."
+            )
+            model_key = manager.config.get_model_key_for_task("generation")
+            model_name = manager.config.get_model_name_for_task("generation")
         adapter_name = (
             "heuristic"
             if model_key == "heuristic"
@@ -435,7 +443,9 @@ def generate_story_from_seed_task(
 ---
 **End of Full Universe Context**
 
-**Instruction:** Based **strictly and solely** on the **Full Universe Context** provided above, continue the story for project '{project_name}'. Use the following seed idea. Ensure the generated story is deeply consistent with **all** aspects of the established lore, characters, locations, events, timeline, and writing style found in the context. Output only the new story content in Markdown format. Do not repeat the context.
+**Instruction:** Based **strictly and solely** on the **Full Universe Context** provided above, continue the story for project '{project_name}'.
+The specific idea to develop is: **'{seed}'**.
+Ensure the generated story is deeply consistent with **all** aspects of the established lore, characters, locations, events, timeline, and writing style found in the context. Output only the new story content in Markdown format. Do not repeat the context.
 
 **Seed idea:** {seed}
 
@@ -446,6 +456,19 @@ def generate_story_from_seed_task(
             project_name=project.name,
             seed=seed.strip(),
             full_context_string=full_context_string,
+        )
+
+        truncated_prompt = prompt[:500]
+        if len(prompt) > 500:
+            truncated_prompt += "... (truncated)"
+        logger.debug(
+            "Prompt being sent to AI for story generation:\n%s",
+            truncated_prompt,
+        )
+        prompt_token_count = len(prompt.split())
+        logger.info(
+            "Estimated prompt word count for generation: %s",
+            prompt_token_count,
         )
 
         generated_body = ""

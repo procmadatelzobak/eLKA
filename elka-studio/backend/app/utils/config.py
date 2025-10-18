@@ -215,11 +215,18 @@ class Config:
 
         tasks_config = self.data.get("tasks", {})
         if isinstance(tasks_config, dict):
-            task_settings = tasks_config.get(task_type, {})
+            task_settings = tasks_config.get(task_type)
             if isinstance(task_settings, dict):
                 model_key = str(task_settings.get("model", "")).strip()
                 if model_key:
                     return model_key
+            if task_type == "seed_generation":
+                generation_settings = tasks_config.get("generation")
+                if isinstance(generation_settings, dict):
+                    model_key = str(generation_settings.get("model", "")).strip()
+                    if model_key:
+                        return model_key
+                raise KeyError("seed_generation")
 
         provider = self.ai_provider()
         if provider != "gemini":
@@ -227,10 +234,13 @@ class Config:
 
         defaults = {
             "generation": "gemini-flash",
+            "seed_generation": "gemini-flash",
             "extraction": "gemini-flash",
             "validation": "gemini-pro",
             "planning": "gemini-pro",
         }
+        if task_type == "seed_generation":
+            return defaults["generation"]
         return defaults.get(task_type, "gemini-pro")
 
     def get_model_name_for_task(self, task_type: str) -> str:
