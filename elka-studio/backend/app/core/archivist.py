@@ -54,31 +54,47 @@ class ArchivistEngine:
     def archive(
         self,
         story_content: str,
+        *,
+        story_file_path: Path,
         universe_context: str | None = None,
     ) -> ArchiveResult:
-        """Return the files to be committed and relevant metadata.
-
-        ``universe_context`` carries the raw text of the universe files that
-        were supplied during validation. When entity extraction supports the
-        additional context it can reuse the data to prefer canonical
-        identifiers and maintain consistency across archives.
-        """
+        """Write the story to ``story_file_path`` and prepare metadata for committing."""
 
         summary = self.ai_adapter.summarise(story_content)
-        slug = self._slugify(summary) or "story"
-        filename = self.config.story_filename(prefix=slug)
-        relative_path = str(self.config.story_directory / filename)
-        # Ensure the directory exists prior to returning the files
-        self.config.ensure_story_directory(self.git_adapter.project_path)
-        document = self._build_document(story_content, summary)
 
-        files = {relative_path: document}
+        try:
+            absolute_path = story_file_path
+            if not story_file_path.is_absolute():
+                absolute_path = self.project_path / story_file_path
+            absolute_path.parent.mkdir(parents=True, exist_ok=True)
+            absolute_path.write_text(story_content, encoding="utf-8")
+            logger.info("Story file saved: %s", absolute_path)
+        except OSError as exc:
+            logger.error("Failed to write story file %s: %s", story_file_path, exc)
+            fallback_directory = (
+                self.config.story_directory
+                if isinstance(self.config.story_directory, Path)
+                else Path(self.config.story_directory)
+            )
+            absolute_path = self.project_path / fallback_directory / "story.md"
+
+        try:
+            relative_path_obj = absolute_path.relative_to(self.project_path)
+        except ValueError:
+            relative_path_obj = absolute_path
+
+        relative_path = str(relative_path_obj)
+        files = {relative_path: story_content}
+        front_matter = _parse_front_matter(story_content)
         metadata = {
             "summary": summary,
-            "filename": filename,
+            "filename": relative_path_obj.name,
             "relative_path": relative_path,
             "timestamp": datetime.utcnow().isoformat(),
         }
+        for key in ("title", "author", "seed", "project"):
+            if key in front_matter:
+                metadata[key] = front_matter[key]
         log_messages = [f"Story archived to {relative_path}"]
 
         extracted_files = {}
@@ -396,15 +412,6 @@ class ArchivistEngine:
     def _slugify(value: str) -> str:
         sanitized = sanitize_filename(value, default="story")
         return sanitized[:40]
-
-    @staticmethod
-    def _build_document(story_content: str, summary: str) -> str:
-        header = "---\n"
-        header += f"summary: \"{summary.replace('\\', '\\\\').replace('"', '\\"')}\"\n"
-        header += f"generated_at: {datetime.utcnow().isoformat()}\n"
-        header += "---\n\n"
-        return f"{header}{story_content.strip()}\n"
-
 
 def _parse_front_matter(text: str) -> dict[str, str]:
     match = re.match(r"^---\n(?P<body>.+?)\n---\n", text, flags=re.DOTALL)

@@ -95,7 +95,7 @@ const extractApiErrorMessage = (apiError) => {
     ? ` (HTTP ${response.status}${response.statusText ? ` ${response.statusText}` : ''})`
     : '';
 
-  return `${message || 'Vytvoření projektu selhalo.'}${statusDetails}`.trim();
+  return `${message || 'Project creation failed.'}${statusDetails}`.trim();
 };
 
 const NewProjectForm = ({ onClose, onCreated }) => {
@@ -122,7 +122,7 @@ const NewProjectForm = ({ onClose, onCreated }) => {
         git_token: formData.access_token,
       });
 
-      setSuccess('Projekt byl úspěšně vytvořen.');
+      setSuccess('Project created successfully.');
       setFormData(initialFormState);
       if (onCreated) {
         onCreated();
@@ -140,8 +140,8 @@ const NewProjectForm = ({ onClose, onCreated }) => {
       <div className="modal__backdrop" role="presentation" onClick={onClose} />
       <div className="modal__content" role="dialog" aria-modal="true">
         <header className="modal__header">
-          <h2>Nový projekt</h2>
-          <button type="button" className="modal__close" onClick={onClose} aria-label="Zavřít">
+          <h2>New project</h2>
+          <button type="button" className="modal__close" onClick={onClose} aria-label="Close">
             ×
           </button>
         </header>
@@ -151,32 +151,32 @@ const NewProjectForm = ({ onClose, onCreated }) => {
             repository already contains a lore universe, eLKA will simply connect to it.
           </p>
           <label className="modal__field">
-            <span>Název projektu</span>
+            <span>Project name</span>
             <input
               type="text"
               name="name"
               value={formData.name}
               onChange={handleChange}
-              placeholder="Např. Kroniky Avalonu"
+              placeholder="e.g. Chronicles of Avalon"
               required
               autoFocus
             />
           </label>
 
           <label className="modal__field">
-            <span>Git repozitář</span>
+            <span>Git repository</span>
             <input
               type="text"
               name="repository_url"
               value={formData.repository_url}
               onChange={handleChange}
-              placeholder="uzivatel/projekt nebo https://example.com/repo.git"
+              placeholder="user/repository or https://example.com/repo.git"
               required
             />
           </label>
 
           <label className="modal__field">
-            <span>Přístupový token</span>
+            <span>Access token</span>
             <input
               type="password"
               name="access_token"
@@ -191,10 +191,10 @@ const NewProjectForm = ({ onClose, onCreated }) => {
 
           <footer className="modal__footer">
             <button type="button" className="modal__secondary" onClick={onClose}>
-              Zavřít
+              Close
             </button>
             <button type="submit" className="modal__primary" disabled={isSubmitting}>
-              {isSubmitting ? 'Vytvářím…' : 'Vytvořit projekt'}
+              {isSubmitting ? 'Creating…' : 'Create project'}
             </button>
           </footer>
         </form>

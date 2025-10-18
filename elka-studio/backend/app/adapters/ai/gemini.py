@@ -5,6 +5,7 @@ import os
 import re
 import time
 from dataclasses import dataclass
+from datetime import datetime, timedelta
 from typing import Any, Dict
 
 from celery.exceptions import MaxRetriesExceededError, Retry
@@ -398,9 +399,11 @@ class GeminiAdapter(BaseAIAdapter):
         )
 
         delay_seconds = self._parse_retry_delay(exc)
+        resume_time = datetime.now() + timedelta(seconds=delay_seconds)
         logger.info(
-            "Rate limit triggered. Will request Celery task retry in %s seconds.",
+            "Rate limit triggered. Will request Celery task retry in %s seconds (estimated resume time: %s).",
             delay_seconds,
+            resume_time.strftime("%Y-%m-%d %H:%M:%S"),
         )
 
         from celery import current_task

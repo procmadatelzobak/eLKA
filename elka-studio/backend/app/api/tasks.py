@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any, List
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Response, status
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
@@ -34,6 +34,16 @@ class TaskCreateRequest(BaseModel):
         default=None,
         description="Optional pull request identifier for Git operations",
     )
+    story_title: str | None = Field(
+        default=None,
+        alias="storyTitle",
+        description="Optional explicit title for generated stories",
+    )
+    story_author: str | None = Field(
+        default=None,
+        alias="storyAuthor",
+        description="Optional author attribution for generated stories",
+    )
 
     class Config:
         allow_population_by_field_name = True
@@ -59,6 +69,10 @@ def create_task(payload: TaskCreateRequest) -> dict:
         params.setdefault("theme", payload.theme)
     if payload.chapters is not None:
         params.setdefault("chapters", payload.chapters)
+    if payload.story_title is not None:
+        params.setdefault("story_title", payload.story_title)
+    if payload.story_author is not None:
+        params.setdefault("story_author", payload.story_author)
 
     if payload.task_type in {
         "generate_story",
@@ -74,6 +88,20 @@ def create_task(payload: TaskCreateRequest) -> dict:
                 detail="seed must be a non-empty string",
             )
         params["seed"] = seed
+        story_title = params.get("story_title")
+        story_author = params.get("story_author")
+        if not isinstance(story_title, str) or not story_title.strip():
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="story_title must be a non-empty string",
+            )
+        if not isinstance(story_author, str) or not story_author.strip():
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="story_author must be a non-empty string",
+            )
+        params["story_title"] = story_title.strip()
+        params["story_author"] = story_author.strip()
     elif payload.task_type in {"generate_saga", "generate_saga_task"}:
         theme = params.get("theme")
         chapters = params.get("chapters")
@@ -89,6 +117,20 @@ def create_task(payload: TaskCreateRequest) -> dict:
             )
         params["theme"] = theme
         params["chapters"] = chapters
+        story_title = params.get("story_title")
+        story_author = params.get("story_author")
+        if not isinstance(story_title, str) or not story_title.strip():
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="story_title must be a non-empty string",
+            )
+        if not isinstance(story_author, str) or not story_author.strip():
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="story_author must be a non-empty string",
+            )
+        params["story_title"] = story_title.strip()
+        params["story_author"] = story_author.strip()
     elif payload.task_type in {"process_story", "process_story_task"}:
         story_content = params.get("story_content")
         if not isinstance(story_content, str) or not story_content.strip():
@@ -104,6 +146,17 @@ def create_task(payload: TaskCreateRequest) -> dict:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
 
     return task.to_dict()
+
+
+@router.delete("/{task_id}", summary="Delete task", status_code=status.HTTP_204_NO_CONTENT)
+def delete_task(task_id: int, session: Session = Depends(get_session)) -> Response:
+    task = session.query(Task).filter(Task.id == task_id).one_or_none()
+    if task is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Task not found")
+    session.delete(task)
+    session.commit()
+    task_manager.broadcast_update(task.project_id)
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
 def _update_task_status(session: Session, task_id: int, status_value: str) -> Task:

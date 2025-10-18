@@ -224,6 +224,8 @@ class TaskManager:
         project_id = params.get("project_id")
         seed = params.get("seed")
         pr_id = params.get("pr_id")
+        story_title = params.get("story_title")
+        story_author = params.get("story_author")
 
         try:
             project_id = int(project_id)
@@ -231,16 +233,24 @@ class TaskManager:
             raise ValueError("project_id is required for story generation") from exc
         if not isinstance(seed, str) or not seed.strip():
             raise ValueError("seed must be a non-empty string")
+        if not isinstance(story_title, str) or not story_title.strip():
+            raise ValueError("story_title must be a non-empty string")
+        if not isinstance(story_author, str) or not story_author.strip():
+            raise ValueError("story_author must be a non-empty string")
 
         generate_sig = lore_tasks.generate_story_from_seed_task.s(
             task_db_id,
             project_id=project_id,
             seed=seed,
             pr_id=pr_id,
+            story_title=story_title.strip(),
+            story_author=story_author.strip(),
         )
         process_sig = lore_tasks.process_story_task.s(
             project_id=project_id,
             pr_id=pr_id,
+            story_title=story_title.strip(),
+            story_author=story_author.strip(),
         )
 
         workflow = chain(generate_sig, process_sig)
