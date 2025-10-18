@@ -5,5 +5,6 @@ GitPython
 python-dotenv
 pyyaml
 redis
+limits
 sqlalchemy
 uvicorn[standard]

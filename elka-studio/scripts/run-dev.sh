@@ -17,6 +17,9 @@ BACKEND_DIR="$ROOT_DIR/backend"
 BACKEND_VENV="$BACKEND_DIR/venv"
 UVICORN_BIN="$BACKEND_VENV/bin/uvicorn"
 CELERY_BIN="$BACKEND_VENV/bin/celery"
+BACKEND_PYTHON="$BACKEND_VENV/bin/python"
+BACKEND_PIP="$BACKEND_VENV/bin/pip"
+BACKEND_REQUIREMENTS_FILE="$BACKEND_DIR/requirements.txt"
 FRONTEND_DIR="$ROOT_DIR/frontend"
 
 ensure_backend_tools() {
@@ -25,9 +28,33 @@ ensure_backend_tools() {
         exit 1
     fi
 
-    if [[ ! -x "$UVICORN_BIN" || ! -x "$CELERY_BIN" ]]; then
+    if [[ ! -x "$UVICORN_BIN" || ! -x "$CELERY_BIN" || ! -x "$BACKEND_PYTHON" || ! -x "$BACKEND_PIP" ]]; then
         echo "Required backend tools are missing from the virtual environment. Re-run 'make setup' to install Python dependencies." >&2
         exit 1
+    fi
+}
+
+ensure_backend_dependencies() {
+    local missing_modules=()
+    local module
+    local modules=(
+        limits
+    )
+
+    for module in "${modules[@]}"; do
+        if ! "$BACKEND_PYTHON" -c "import importlib.util, sys; sys.exit(0 if importlib.util.find_spec('$module') else 1)" >/dev/null 2>&1; then
+            missing_modules+=("$module")
+        fi
+    done
+
+    if (( ${#missing_modules[@]} > 0 )); then
+        if [[ ! -f "$BACKEND_REQUIREMENTS_FILE" ]]; then
+            echo "Backend requirements file not found at '$BACKEND_REQUIREMENTS_FILE'. Please run 'make setup'." >&2
+            exit 1
+        fi
+
+        echo "Installing missing backend Python packages: ${missing_modules[*]}..."
+        "$BACKEND_PIP" install -r "$BACKEND_REQUIREMENTS_FILE"
     fi
 }
 
@@ -115,6 +142,7 @@ cleanup() {
 
 ensure_redis
 ensure_backend_tools
+ensure_backend_dependencies
 ensure_frontend_tools
 
 trap cleanup EXIT
