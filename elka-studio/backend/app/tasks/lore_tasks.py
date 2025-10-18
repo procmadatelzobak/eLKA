@@ -514,13 +514,13 @@ Ensure the generated story is deeply consistent with **all** aspects of the esta
 
         resolved_title = (
             (story_title or "").strip()
-            or seed_clean.split("\n", maxsplit=1)[0].strip()
+            or seed.split("\n", maxsplit=1)[0].strip()
             or "Untitled Story"
         )
         resolved_author = (story_author or "").strip() or "eLKA Author"
         story_content, story_relative_path = _build_story_document(
             project,
-            seed_clean,
+            seed,
             resolved_title,
             resolved_author,
             generated_body=generated_body,
@@ -550,7 +550,7 @@ Ensure the generated story is deeply consistent with **all** aspects of the esta
             "story_title": resolved_title,
             "story_author": resolved_author,
             "story_file_path": str(story_relative_path),
-            "seed": seed_clean,
+            "seed": seed,
         }
     except Exception as exc:  # pragma: no cover - defensive logging
         if isinstance(exc, Retry):
