@@ -37,7 +37,7 @@ const ProjectsPage = () => {
       const response = await getProjects();
       setProjects(response.data || []);
     } catch (apiError) {
-      const message = apiError.response?.data?.detail || 'Nepodařilo se načíst projekty.';
+      const message = apiError.response?.data?.detail || 'Failed to load projects.';
       setError(message);
     } finally {
       setIsLoading(false);
@@ -84,9 +84,9 @@ const ProjectsPage = () => {
     <div className="projects-page">
       <header className="projects-page__header">
         <div>
-          <h1>Projekty</h1>
+          <h1>Projects</h1>
           <p className="projects-page__subtitle">
-            Spravujte generování lore a sledujte stav jednotlivých světů.
+            Manage lore generation and monitor the status of each universe.
           </p>
         </div>
         <button
@@ -112,14 +112,14 @@ const ProjectsPage = () => {
         </div>
       ) : (
         <>
-          {isLoading && <div className="projects-page__placeholder">Načítám projekty…</div>}
+          {isLoading && <div className="projects-page__placeholder">Loading projects…</div>}
           {error && <div className="projects-page__error">{error}</div>}
 
           {!isLoading && !error && (
             <section className="projects-page__grid" aria-live="polite">
               {projects.length === 0 ? (
                 <div className="projects-page__placeholder projects-page__placeholder--empty">
-                  Zatím žádné projekty. Založte první kliknutím na „Add/Import Project“.
+                  No projects yet. Create the first one via “Add/Import Project”.
                 </div>
               ) : (
                 projects.map((project) => (
@@ -141,13 +141,13 @@ const ProjectsPage = () => {
                       <span
                         className="projects-page__status-dot"
                         style={{ backgroundColor: statusColors[project.status] || '#60a5fa' }}
-                        aria-label={`Stav: ${project.status}`}
+                        aria-label={`Status: ${project.status}`}
                       />
                     </div>
                     <p className="projects-page__card-meta">
-                      {project.git_url || 'Bez repozitáře'}
+                      {project.git_url || 'No repository configured'}
                     </p>
-                    <p className="projects-page__card-status">{project.status ?? 'neznámý stav'}</p>
+                    <p className="projects-page__card-status">{project.status ?? 'Unknown status'}</p>
                   </article>
                 ))
               )}

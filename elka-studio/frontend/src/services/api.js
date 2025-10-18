@@ -34,4 +34,6 @@ export const pauseTask = (taskId) => getApiClient().post(`/tasks/${taskId}/pause
 
 export const resumeTask = (taskId) => getApiClient().post(`/tasks/${taskId}/resume`);
 
+export const deleteTask = (taskId) => getApiClient().delete(`/tasks/${taskId}`);
+
 export default getApiClient;

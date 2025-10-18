@@ -24,51 +24,61 @@ from app.db.session import SessionLocal
 from app.models.project import Project
 from app.models.task import Task, TaskStatus
 from app.tasks.base import BaseTask
+from app.utils.filesystem import sanitize_filename
 
 logger = get_task_logger(__name__)
 
 
-def _generate_metadata_block(project: Project, seed: str) -> str:
-    config = app_context.config
-    generated_at = datetime.utcnow().replace(microsecond=0).isoformat() + "Z"
-    title = seed.strip().split("\n", maxsplit=1)[0].strip().title() or "Untitled Saga Entry"
-    metadata = {
-        "title": title,
-        "seed": seed.strip(),
-        "project": project.name,
-        "generated_at": generated_at,
-        "model": config.ai_model,
-        "author": "eLKA Autonomous Scribe",
-    }
-    lines = ["---"] + [f"{key}: {value}" for key, value in metadata.items()] + ["---", ""]
-    return "\n".join(lines)
+def _escape_front_matter(value: str) -> str:
+    text = (value or "").strip()
+    return text.replace("\\", "\\\\").replace('"', '\\"')
 
 
-def _write_story(seed: str, project: Project, generated_body: str | None = None) -> str:
-    metadata = _generate_metadata_block(project, seed)
+def _build_story_document(
+    project: Project,
+    seed: str,
+    story_title: str,
+    story_author: str,
+    generated_body: str | None = None,
+) -> tuple[str, Path]:
+    """Compose the final story document with YAML front matter."""
+
+    resolved_title = story_title.strip() or "Untitled Story"
+    resolved_author = story_author.strip() or "eLKA Author"
     body = (generated_body or "").strip()
     if not body:
-        premise = seed.strip() or "An unexpected development in the eLKA universe."
         body = dedent(
             f"""
             ## Opening
-            The saga opens on the central theme: {premise}. The tone mirrors the established
-            chronicles of {project.name}, weaving familiar motifs with fresh tensions.
+            The saga opens by expanding upon the latest creative direction while respecting the canon of {project.name}.
 
             ## Rising Action
-            Characters evolve as they respond to the call of the seed. Relationships shift,
-            secrets surface, and the lore of {project.name} deepens through new dilemmas
-            sparked by the guiding idea.
+            Characters evolve as new tensions surface, ensuring the narrative remains faithful to the established universe.
 
             ## Resolution
-            The story concludes with consequences that matter to the wider canon. Threads
-            remain for future tales, while the immediate conflict finds closure that feels
-            authentic to the universe.
+            The immediate conflict reaches a satisfying conclusion while leaving deliberate threads for future chronicles.
             """
         ).strip()
     if not body.endswith("\n"):
         body = f"{body}\n"
-    return f"{metadata}{body}"
+
+    timestamp = datetime.utcnow()
+    generated_at = timestamp.replace(microsecond=0).isoformat() + "Z"
+    sanitized_title = sanitize_filename(resolved_title, default="story")
+    story_filename = f"{sanitized_title}-{timestamp.strftime('%Y%m%d-%H%M%S')}.md"
+    relative_path = Path("stories") / story_filename
+    front_matter_lines = [
+        "---",
+        f"title: \"{_escape_front_matter(resolved_title)}\"",
+        f"author: \"{_escape_front_matter(resolved_author)}\"",
+        f"generated_at: {generated_at}",
+        f"seed: \"{_escape_front_matter(seed)}\"",
+        f"project: \"{_escape_front_matter(project.name)}\"",
+        "---",
+        "",
+    ]
+    document = "\n".join(front_matter_lines) + body
+    return document, relative_path
 
 
 def _plan_saga(theme: str, chapters: int) -> list[dict[str, str]]:
@@ -256,6 +266,8 @@ def uce_process_story_task(
     )
 
     try:
+        seed_clean = seed.strip()
+
         project = app_context.git_manager.get_project_from_db(project_id)
         project_path = app_context.git_manager.resolve_project_path(project)
         manager.update_task_status(
@@ -383,6 +395,8 @@ def generate_story_from_seed_task(
     project_id: int,
     seed: str,
     pr_id: int | None = None,
+    story_title: str | None = None,
+    story_author: str | None = None,
 ) -> dict:
     """Generate a story from a seed and return the content for further processing."""
 
@@ -488,14 +502,33 @@ Ensure the generated story is deeply consistent with **all** aspects of the esta
         generated_body = text.strip()
         _accumulate_usage(usage_metadata, tokens)
 
-        story_content = _write_story(seed, project, generated_body=generated_body)
+        resolved_title = (
+            (story_title or "").strip()
+            or seed_clean.split("\n", maxsplit=1)[0].strip()
+            or "Untitled Story"
+        )
+        resolved_author = (story_author or "").strip() or "eLKA Author"
+        story_content, story_relative_path = _build_story_document(
+            project,
+            seed_clean,
+            resolved_title,
+            resolved_author,
+            generated_body=generated_body,
+        )
 
         manager.update_task_status(
             celery_task_id,
             TaskStatus.RUNNING,
             progress=55,
-            log_message="Story drafted. Ready for processing pipeline...",
-            result={"story": story_content},
+            log_message="Story drafted. Preparing processing pipeline...",
+            result={
+                "story": story_content,
+                "metadata": {
+                    "title": resolved_title,
+                    "author": resolved_author,
+                    "relative_path": str(story_relative_path),
+                },
+            },
         )
 
         return {
@@ -504,6 +537,10 @@ Ensure the generated story is deeply consistent with **all** aspects of the esta
             "story_content": story_content,
             "universe_context": full_context_string,
             "pr_id": pr_id,
+            "story_title": resolved_title,
+            "story_author": resolved_author,
+            "story_file_path": str(story_relative_path),
+            "seed": seed_clean,
         }
     except Exception as exc:  # pragma: no cover - defensive logging
         if isinstance(exc, Retry):
@@ -530,6 +567,9 @@ def process_story_task(
     project_id: int | None = None,
     story_content: str | None = None,
     pr_id: int | None = None,
+    story_title: str | None = None,
+    story_author: str | None = None,
+    story_file_path: str | None = None,
 ) -> None:
     """Validate, archive, and commit a story to the project's repository."""
 
@@ -545,6 +585,9 @@ def process_story_task(
         project_id = project_id or payload.get("project_id")
         pr_id = pr_id or payload.get("pr_id")
         universe_context = payload.get("universe_context")
+        story_title = story_title or payload.get("story_title")
+        story_author = story_author or payload.get("story_author")
+        story_file_path = story_file_path or payload.get("story_file_path")
     else:
         task_db_id = int(payload)
         universe_context = None
@@ -566,6 +609,20 @@ def process_story_task(
     try:
         project = app_context.git_manager.get_project_from_db(project_id)
         project_path = Path(app_context.git_manager.resolve_project_path(project))
+
+        relative_story_path: Path
+        if story_file_path:
+            candidate_path = Path(story_file_path)
+            if candidate_path.is_absolute():
+                try:
+                    candidate_path = candidate_path.relative_to(project_path)
+                except ValueError:
+                    candidate_path = Path("stories") / candidate_path.name
+            relative_story_path = candidate_path
+        else:
+            fallback_title = (story_title or "Untitled Story").strip() or "Untitled Story"
+            sanitized = sanitize_filename(fallback_title, default="story")
+            relative_story_path = Path("stories") / f"{sanitized}-{datetime.utcnow().strftime('%Y%m%d-%H%M%S')}.md"
 
         if not universe_context:
             universe_context = _load_full_universe_context(project_path, project_id_int)
@@ -626,9 +683,15 @@ def process_story_task(
 
         archive_result = archivist.archive(
             story_content,
+            story_file_path=project_path / relative_story_path,
             universe_context=universe_context,
         )
         files_to_commit: dict[str, str] = dict(archive_result.files)
+
+        if story_title and "title" not in archive_result.metadata:
+            archive_result.metadata["title"] = story_title
+        if story_author and "author" not in archive_result.metadata:
+            archive_result.metadata["author"] = story_author
 
         for message in archive_result.log_messages:
             manager.update_task_status_by_db_id(
@@ -658,7 +721,10 @@ def process_story_task(
             },
         )
 
-        commit_summary = archive_result.metadata.get("summary", "New story")
+        commit_summary = (
+            archive_result.metadata.get("title")
+            or archive_result.metadata.get("summary", "New story")
+        )
         commit_message = f"Add lore entry: {commit_summary}"
 
         manager.update_task_status_by_db_id(
@@ -700,6 +766,8 @@ def generate_saga_task(
     theme: str,
     chapters: int,
     pr_id: int | None = None,
+    story_title: str | None = None,
+    story_author: str | None = None,
 ) -> None:
     """Plan a saga and dispatch story generation subtasks."""
 
@@ -720,6 +788,8 @@ def generate_saga_task(
 
     try:
         project = app_context.git_manager.get_project_from_db(project_id)
+        resolved_author = (story_author or "").strip() or "eLKA Author"
+        base_title = (story_title or "").strip()
 
         manager.update_task_status(
             celery_task_id,
@@ -757,7 +827,17 @@ def generate_saga_task(
                     f"Dispatching chapter {index}/{chapters}: {chapter['title']}."
                 ),
             )
-            params = {"seed": chapter["seed"]}
+            chapter_title = chapter["title"].strip()
+            full_chapter_title = (
+                f"{base_title} — {chapter_title}"
+                if base_title
+                else chapter_title
+            )
+            params = {
+                "seed": chapter["seed"],
+                "story_title": full_chapter_title,
+                "story_author": resolved_author,
+            }
             if pr_id is not None:
                 params["pr_id"] = pr_id
             sub_task = manager.create_task(

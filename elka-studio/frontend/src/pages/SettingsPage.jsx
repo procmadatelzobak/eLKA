@@ -34,20 +34,20 @@ const SettingsPage = () => {
 
     try {
       if (typeof window === 'undefined') {
-        throw new Error('Nelze pracovat s úložištěm mimo prohlížeč.');
+        throw new Error('Local storage is only available in the browser.');
       }
 
       const trimmedKey = apiKey.trim();
       if (trimmedKey) {
         window.localStorage.setItem(GEMINI_API_KEY_STORAGE_KEY, trimmedKey);
-        setStatus({ type: 'success', message: 'Gemini API Key byl uložen pro tento prohlížeč.' });
+        setStatus({ type: 'success', message: 'Gemini API Key saved for this browser.' });
       } else {
         window.localStorage.removeItem(GEMINI_API_KEY_STORAGE_KEY);
-        setStatus({ type: 'info', message: 'Gemini API Key byl odstraněn z tohoto prohlížeče.' });
+        setStatus({ type: 'info', message: 'Gemini API Key removed from this browser.' });
       }
     } catch (error) {
       console.error('Failed to persist Gemini API Key', error);
-      setStatus({ type: 'error', message: 'Nepodařilo se uložit nastavení. Zkuste to prosím znovu.' });
+      setStatus({ type: 'error', message: 'Failed to save settings. Please try again.' });
     } finally {
       setIsSaving(false);
     }
@@ -57,19 +57,18 @@ const SettingsPage = () => {
     <div className="settings-page">
       <header className="settings-page__header">
         <div>
-          <h1>Nastavení</h1>
+          <h1>Settings</h1>
           <p className="settings-page__subtitle">
-            Spravujte globální nastavení eLKA Studia. API klíče jsou ukládány pouze lokálně v tomto zařízení.
+            Manage global preferences for eLKA Studio. API keys are stored locally on this device only.
           </p>
         </div>
-        <button type="button" className="settings-page__projects" onClick={() => navigate('/')}>↩ Zpět na projekty</button>
+        <button type="button" className="settings-page__projects" onClick={() => navigate('/')}>↩ Back to projects</button>
       </header>
 
       <section className="settings-page__card">
         <h2 className="settings-page__section-title">Gemini API Key</h2>
         <p className="settings-page__section-help">
-          Tento klíč se používá k autorizaci všech požadavků na generativní AI. Ukládá se do localStorage a nikdy neopustí
-          váš počítač.
+          This key authorises all generative AI requests. It is stored in localStorage and never leaves your computer.
         </p>
 
         <form className="settings-page__form" onSubmit={handleSubmit}>
@@ -82,7 +81,7 @@ const SettingsPage = () => {
               autoComplete="new-password"
               value={apiKey}
               onChange={(event) => setApiKey(event.target.value)}
-              placeholder="Skopírujte sem svůj tajný klíč"
+              placeholder="Paste your secret key here"
             />
           </label>
 
@@ -94,9 +93,9 @@ const SettingsPage = () => {
 
           <footer className="settings-page__actions">
             <button type="submit" className="settings-page__primary" disabled={isSaving}>
-              {isSaving ? 'Ukládám…' : 'Uložit klíč'}
+              {isSaving ? 'Saving…' : 'Save key'}
             </button>
-            <button type="button" className="settings-page__secondary" onClick={() => navigate('/')}>Zobrazit projekty</button>
+            <button type="button" className="settings-page__secondary" onClick={() => navigate('/')}>View projects</button>
           </footer>
         </form>
       </section>

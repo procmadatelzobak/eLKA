@@ -1,54 +1,54 @@
 # eLKA Studio – Frontend
 
-Tato část repozitáře obsahuje Single Page Application (SPA) postavenou na Reactu a Vite. UI komunikuje s FastAPI backendem běžícím na `http://localhost:8000/api`.
+This directory hosts the React + Vite single-page application that powers the eLKA Studio user interface. The UI communicates with the FastAPI backend exposed at `http://localhost:8000/api`.
 
-## Požadavky
+## Requirements
 
 - Node.js 20+
 - npm 10+
 
-## Lokální vývoj
+## Local development
 
 ```bash
 npm install
 npm run dev
 ```
 
-Aplikace se spustí na adrese [http://localhost:5173](http://localhost:5173). Backendová adresa je konfigurovatelná proměnnou prostředí `VITE_API_BASE_URL`.
+The development server is available at [http://localhost:5173](http://localhost:5173). The backend base URL can be customised through the `VITE_API_BASE_URL` environment variable.
 
-> 💡 **Tip:** V kořenovém adresáři projektu lze použít `make run-dev`, který kromě backendu automaticky spustí i tento Vite server (s parametrem `--host 0.0.0.0`). Pokud potřebujete jen API, použijte `make run-backend`.
+> 💡 **Tip:** From the repository root you can run `make run-dev` to launch both the backend and this Vite server (with `--host 0.0.0.0`). Use `make run-backend` if you only need the API.
 
-## Struktura
+## Project structure
 
 ```
 src/
-├── components/        # Sdílené UI komponenty (modaly, formuláře, ...)
-├── layouts/           # Základní rozložení stránky (sidebar + obsah)
-├── pages/             # Stránky routované pomocí React Routeru
-├── services/          # Klient pro komunikaci s API (Axios)
-└── main.jsx           # Vstupní bod aplikace
+├── components/        # Shared UI components such as modals and forms
+├── layouts/           # Reusable page layouts (sidebar + content)
+├── pages/             # Routeable views managed by React Router
+├── services/          # API and websocket clients
+└── main.jsx           # Application entry point
 ```
 
-## Dostupné skripty
+## Available npm scripts
 
-- `npm run dev` – spuštění vývojového serveru s HMR
-- `npm run build` – produkční build
-- `npm run preview` – náhled výsledného buildu
-- `npm run lint` – statická analýza pomocí ESLintu
+- `npm run dev` – start the development server with HMR
+- `npm run build` – produce a production bundle
+- `npm run preview` – preview the production bundle locally
+- `npm run lint` – run ESLint against the source code
 
-## API klient
+## API client
 
-Soubor `src/services/api.js` definuje instanci Axiosu s výchozí adresou `http://localhost:8000/api`. Pro změnu použijte `.env` soubor s proměnnou `VITE_API_BASE_URL`.
+`src/services/api.js` defines the Axios instance that targets `http://localhost:8000/api` by default. Override the base URL via a `.env` file with the `VITE_API_BASE_URL` variable.
 
-## Projektový dashboard
+## Project dashboard
 
-Stránka `ProjectDashboardPage` slouží jako hlavní pracovní prostředí pro konkrétní projekt. Umožňuje odesílat nové úlohy agentovi eLKA (zpracování příběhu, generování z seed hodnoty nebo vytvoření ságy) a v reálném čase sledovat jejich stav prostřednictvím WebSocketu.
+`ProjectDashboardPage` is the primary workspace for a project. It lets you submit new tasks (story processing, seed-based story generation, saga creation) and observe their progress in real time through websockets.
 
-- Ovládací panel se stará o validaci a odeslání požadavků pomocí funkce `createTask` z modulu `src/services/api.js`.
-- Fronta úloh využívá službu `TaskSocket` (`src/services/websocket.js`) pro připojení na endpoint `/ws/tasks/{projectId}` a zobrazuje průběh včetně logů.
-- Jakmile se úloha dokončí, lze přímo ve frontě otevřít náhled vygenerovaného příběhu nebo souborů archivace díky modálnímu dialogu.
-- Akce pozastavení a opětovného spuštění úlohy lze volat funkcemi `pauseTask` a `resumeTask`.
+- The control panel validates and submits requests with the `createTask` helper from `src/services/api.js`.
+- The queue consumes updates via `TaskSocket` (`src/services/websocket.js`) to render progress and logs.
+- Completed tasks expose modals to preview the generated story and archived files.
+- Pause and resume actions are delegated to the `pauseTask` and `resumeTask` API helpers.
 
-### Konfigurace WebSocketu
+### WebSocket configuration
 
-Výchozí adresa pro WebSocket se odvozuje od `VITE_API_BASE_URL`. Pokud backend běží na jiné adrese nebo portu, je možné jej přepsat proměnnou prostředí `VITE_WS_BASE_URL` (např. `ws://localhost:8000`).
+The websocket URL defaults to the value derived from `VITE_API_BASE_URL`. If the backend runs on a different host or port, override it with the `VITE_WS_BASE_URL` environment variable (for example `ws://localhost:8000`).
