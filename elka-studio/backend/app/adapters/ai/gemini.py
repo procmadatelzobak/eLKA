@@ -158,8 +158,9 @@ class GeminiAdapter(BaseAIAdapter):
             self._handle_rate_limit(exc, operation="text generation")
             return "", None
         except Exception as exc:
+            # Allow Celery retry exceptions to propagate without logging.
             if isinstance(exc, Retry):
-                raise
+                raise exc
             logger.error(
                 "Unexpected error during Gemini text generation: %s",
                 exc,
@@ -200,8 +201,9 @@ class GeminiAdapter(BaseAIAdapter):
             self._handle_rate_limit(exc, operation="analysis")
             return str(exc)
         except Exception as exc:
+            # Allow Celery retry exceptions to propagate without logging.
             if isinstance(exc, Retry):
-                raise
+                raise exc
             logger.error(
                 "Unexpected error during Gemini analysis: %s",
                 exc,
@@ -239,8 +241,9 @@ class GeminiAdapter(BaseAIAdapter):
             self._handle_rate_limit(exc, operation="JSON generation")
             return "{}", None
         except Exception as exc:
+            # Allow Celery retry exceptions to propagate without logging.
             if isinstance(exc, Retry):
-                raise
+                raise exc
             logger.error(
                 "Unexpected error during Gemini JSON generation: %s",
                 exc,
