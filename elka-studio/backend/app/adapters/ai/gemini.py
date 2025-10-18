@@ -2,6 +2,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import re
 import time
 from dataclasses import dataclass
 from typing import Dict
@@ -72,6 +73,7 @@ class GeminiAdapter(BaseAIAdapter):
             return
 
         logged = False
+        waited = False
         while True:
             try:
                 allowed = self._rate_limiter.hit(
@@ -97,6 +99,10 @@ class GeminiAdapter(BaseAIAdapter):
                 logged = True
 
             time.sleep(self._rate_limit_sleep or 1.0)
+            waited = True
+
+        if waited:
+            logger.info("Rate limit slot acquired after waiting.")
 
         # TODO: Consider surfacing estimated wait durations to task metadata so
         # long-running jobs can report ETA updates while throttled. Accuracy is
@@ -145,8 +151,43 @@ class GeminiAdapter(BaseAIAdapter):
                 model=model_name, contents=prompt
             )
         except ResourceExhausted as exc:
-            logger.warning("Gemini rate limit reached when generating text: %s", exc)
-            raise
+            logger.warning(
+                "Gemini rate limit hit during text generation: %s",
+                exc,
+            )
+            limit_type = "Token Count" if "token_count" in str(exc) else "Request Rate (RPM)"
+            logger.warning(
+                "Detected Limit Type: %s. Consider adjusting context size or RPM config.",
+                limit_type,
+            )
+            delay_seconds = self._parse_retry_delay(exc)
+            logger.info(
+                "Rate limit triggered. Will request Celery task retry in %s seconds.",
+                delay_seconds,
+            )
+
+            from celery import current_task, exceptions
+
+            if current_task:
+                try:
+                    raise current_task.retry(
+                        exc=exc, countdown=delay_seconds, max_retries=5
+                    )
+                except exceptions.MaxRetriesExceededError:
+                    logger.error("Max retries exceeded for rate limit. Task will fail.")
+                    raise exc
+                except Exception as retry_exc:  # pragma: no cover - defensive logging
+                    logger.error(
+                        "Error during Celery retry attempt: %s",
+                        retry_exc,
+                    )
+                    raise exc
+            else:
+                logger.warning(
+                    "Not running within a Celery task context, re-raising ResourceExhausted."
+                )
+                raise exc
+            raise exc
         metadata = self._extract_usage_metadata(response)
         return getattr(response, "text", ""), metadata
 
@@ -205,7 +246,46 @@ class GeminiAdapter(BaseAIAdapter):
         """Return JSON-formatted text by combining system and user prompts."""
 
         prompt = f"{system}\n\n{user}"
-        text, metadata = self.generate_text(prompt, model_key=model_key)
+        try:
+            text, metadata = self.generate_text(prompt, model_key=model_key)
+        except ResourceExhausted as exc:
+            logger.warning(
+                "Gemini rate limit hit during JSON generation: %s",
+                exc,
+            )
+            limit_type = "Token Count" if "token_count" in str(exc) else "Request Rate (RPM)"
+            logger.warning(
+                "Detected Limit Type: %s. Consider adjusting context size or RPM config.",
+                limit_type,
+            )
+            delay_seconds = self._parse_retry_delay(exc)
+            logger.info(
+                "Rate limit triggered. Will request Celery task retry in %s seconds.",
+                delay_seconds,
+            )
+
+            from celery import current_task, exceptions
+
+            if current_task:
+                try:
+                    raise current_task.retry(
+                        exc=exc, countdown=delay_seconds, max_retries=5
+                    )
+                except exceptions.MaxRetriesExceededError:
+                    logger.error("Max retries exceeded for rate limit. Task will fail.")
+                    raise exc
+                except Exception as retry_exc:  # pragma: no cover - defensive logging
+                    logger.error(
+                        "Error during Celery retry attempt: %s",
+                        retry_exc,
+                    )
+                    raise exc
+            else:
+                logger.warning(
+                    "Not running within a Celery task context, re-raising ResourceExhausted."
+                )
+                raise exc
+            raise exc
         try:
             json.loads(text)
         except json.JSONDecodeError as exc:
@@ -216,6 +296,51 @@ class GeminiAdapter(BaseAIAdapter):
             logger.error("Error processing Gemini JSON response: %s", exc)
             raise
         return text, metadata
+
+    def _parse_retry_delay(self, exc: ResourceExhausted) -> int:
+        """Best-effort extraction of retry delay seconds from Gemini errors."""
+
+        default_delay = max(int(self._rate_limit_sleep or 1.0), 5)
+
+        retry_delay = getattr(exc, "retry_delay", None)
+        if retry_delay is not None:
+            total_seconds = getattr(retry_delay, "total_seconds", None)
+            if callable(total_seconds):
+                seconds = int(total_seconds())
+                if seconds > 0:
+                    return seconds
+            try:
+                seconds = int(retry_delay)
+                if seconds > 0:
+                    return seconds
+            except (TypeError, ValueError):
+                pass
+
+        metadata = getattr(exc, "errors", None)
+        if isinstance(metadata, list):
+            for error in metadata:
+                if isinstance(error, dict):
+                    for key in ("retry_delay", "retryDelay", "retry-after", "retry_after"):
+                        value = error.get(key)
+                        if value is None:
+                            continue
+                        if isinstance(value, (int, float)) and value > 0:
+                            return int(value)
+                        if isinstance(value, str):
+                            match = re.search(r"(\d+(?:\.\d+)?)", value)
+                            if match:
+                                seconds = float(match.group(1))
+                                if seconds > 0:
+                                    return max(int(seconds), 1)
+
+        message = str(exc)
+        match = re.search(r"retry\s*(?:in|after)\s*(\d+)", message, re.IGNORECASE)
+        if match:
+            seconds = int(match.group(1))
+            if seconds > 0:
+                return seconds
+
+        return default_delay
 
     def count_tokens(self, text: str) -> int:
         try:

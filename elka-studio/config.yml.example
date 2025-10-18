@@ -46,6 +46,8 @@ ai:
 tasks:
   generation:
     model: "gemini-flash"
+  seed_generation:
+    model: "gemini-pro"
   extraction:
     model: "gemini-flash"
   validation:
