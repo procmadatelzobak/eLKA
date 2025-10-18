@@ -24,7 +24,10 @@ export const getApiClient = () => {
 
 export const getProjects = () => getApiClient().get('/projects/');
 
-export const getProject = (projectId) => getApiClient().get(`/projects/${projectId}`);
+export const fetchProject = async (projectId) => {
+  const response = await getApiClient().get(`/projects/${projectId}`);
+  return response.data;
+};
 
 export const createProject = (projectData) => getApiClient().post('/projects/', projectData);
 
@@ -34,6 +37,14 @@ export const pauseTask = (taskId) => getApiClient().post(`/tasks/${taskId}/pause
 
 export const resumeTask = (taskId) => getApiClient().post(`/tasks/${taskId}/resume`);
 
-export const deleteTask = (taskId) => getApiClient().delete(`/tasks/${taskId}`);
+export const deleteTask = async (taskId) => {
+  try {
+    const response = await getApiClient().delete(`/tasks/${taskId}`);
+    return response.status === 204;
+  } catch (error) {
+    console.error('Failed to delete task:', error);
+    throw error;
+  }
+};
 
 export default getApiClient;

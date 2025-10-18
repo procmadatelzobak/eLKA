@@ -10,7 +10,8 @@ eLKA Studio is a full-stack application for building and managing fictional univ
 - **Automated lore processing** – Validate, archive, and version generated content with Git integration.
 - **Full-context story pipeline** – A single task loads the entire universe, generates consistent lore, archives entities, and updates the timeline automatically.
 - **Manual story processing** – Submit existing stories for validation, extraction, and archival directly from the dashboard.
-- **Objekty entity archival** – Persist extracted characters, locations, and events into `.txt` files mirroring the `Objekty/` structure used by AI Universe projects.
+- **Objects entity archival** – Persist extracted characters, locations, and events into `.txt` files inside the `Objects/` structure used by AI Universe projects.
+- **Story metadata front matter** – Generated manuscripts now begin with YAML metadata containing the title, author, originating seed, and UTC timestamp for downstream tooling.
 - **Universe Consistency Engine** – Extract facts, verify canon conflicts, and propose Git-ready updates.
 - **Extensible architecture** – Modular backend services and a modern React frontend designed for customization.
 - **Token transparency** – Track estimated universe context size and per-task token consumption to manage Gemini quotas.
@@ -106,7 +107,7 @@ eLKA Studio is a full-stack application for building and managing fictional univ
 ### Additional information
 
 - `POST /api/tasks/story/process` accepts `{ project_id, story_text, apply? }`. The default **DRY-RUN** mode always stores the diff in the task record.
-- The legends (`Legendy/*.md`) and the template `templates/universe_scaffold/Legends/CORE_TRUTHS.md` are automatically loaded during validation.
+- The legends (`Legends/*.md`) and the template `templates/universe_scaffold/Legends/CORE_TRUTHS.md` are automatically loaded during validation.
 - Validation and entity extraction now reuse the in-memory universe context string directly, ensuring the Gemini validator and extractor stay aware of the complete lore set without relying on file-path hints.
 - If Gemini is unavailable, the heuristic adapter keeps the workflow running—the resulting diffs and Git commits remain deterministic.
 - Quick local test: run `pytest elka-studio/backend/tests/test_uce_pipeline.py` to confirm the full **DRY-RUN → APPLY → NO-OP** flow against a temporary Git repository.
