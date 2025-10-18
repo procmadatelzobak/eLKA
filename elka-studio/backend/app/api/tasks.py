@@ -89,6 +89,14 @@ def create_task(payload: TaskCreateRequest) -> dict:
             )
         params["theme"] = theme
         params["chapters"] = chapters
+    elif payload.task_type in {"process_story", "process_story_task"}:
+        story_content = params.get("story_content")
+        if not isinstance(story_content, str) or not story_content.strip():
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="story_content must be a non-empty string",
+            )
+        params["story_content"] = story_content.strip()
 
     try:
         task = task_manager.create_task(payload.project_id, payload.task_type, params)

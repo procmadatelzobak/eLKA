@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useParams } from 'react-router-dom';
 import TaskSocket from '../services/websocket';
-import { createTask, pauseTask, resumeTask } from '../services/api';
+import { createTask, getProject, pauseTask, resumeTask } from '../services/api';
 import './ProjectDashboardPage.css';
 
 const statusColors = {
@@ -20,8 +20,10 @@ const taskActionMessages = {
 const ProjectDashboardPage = () => {
   const { projectId } = useParams();
   const [tasks, setTasks] = useState([]);
-  const [activeTab, setActiveTab] = useState('generate_and_process_story_from_seed');
+  const [projectDetails, setProjectDetails] = useState(null);
+  const [activeTab, setActiveTab] = useState('generate_story');
   const [seedValue, setSeedValue] = useState('');
+  const [storyContent, setStoryContent] = useState('');
   const [sagaTheme, setSagaTheme] = useState('');
   const [sagaChapters, setSagaChapters] = useState(3);
   const [formError, setFormError] = useState(null);
@@ -41,6 +43,29 @@ const ProjectDashboardPage = () => {
 
     return () => {
       socket.disconnect();
+    };
+  }, [projectId]);
+
+  useEffect(() => {
+    let isMounted = true;
+
+    const fetchProjectDetails = async () => {
+      try {
+        const response = await getProject(projectId);
+        if (isMounted) {
+          setProjectDetails(response.data || null);
+        }
+      } catch (error) {
+        if (isMounted) {
+          setProjectDetails(null);
+        }
+      }
+    };
+
+    fetchProjectDetails();
+
+    return () => {
+      isMounted = false;
     };
   }, [projectId]);
 
@@ -182,7 +207,7 @@ const ProjectDashboardPage = () => {
       params: {},
     };
 
-    if (type === 'generate_and_process_story_from_seed') {
+    if (type === 'generate_story') {
       if (!seedValue.trim()) {
         setFormError('Zadejte seed pro generování.');
         return;
@@ -217,12 +242,44 @@ const ProjectDashboardPage = () => {
       await createTask(payload);
       setFormMessage('Úloha byla úspěšně odeslána agentovi eLKA.');
 
-      if (type === 'generate_and_process_story_from_seed') {
+      if (type === 'generate_story') {
         setSeedValue('');
-      } else {
+      } else if (type === 'generate_saga') {
         setSagaTheme('');
         setSagaChapters(3);
       }
+    } catch (error) {
+      const detail = error.response?.data?.detail || 'Odeslání úlohy se nezdařilo.';
+      setFormError(detail);
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  const handleProcessStorySubmit = async (event) => {
+    event.preventDefault();
+    setFormError(null);
+    setFormMessage(null);
+
+    if (!storyContent.trim()) {
+      setFormError('Vložte text příběhu k analýze.');
+      return;
+    }
+
+    const payload = {
+      project_id: projectId,
+      type: 'process_story',
+      params: {
+        story_content: storyContent.trim(),
+      },
+    };
+
+    setIsSubmitting(true);
+
+    try {
+      await createTask(payload);
+      setFormMessage('Existující příběh byl odeslán ke zpracování.');
+      setStoryContent('');
     } catch (error) {
       const detail = error.response?.data?.detail || 'Odeslání úlohy se nezdařilo.';
       setFormError(detail);
@@ -239,6 +296,14 @@ const ProjectDashboardPage = () => {
           <p className="project-dashboard__subtitle">
             Spravujte úlohy projektu <strong>#{projectId}</strong>, odesílejte nové požadavky a sledujte jejich průběh.
           </p>
+          {projectDetails && (
+            <p className="project-dashboard__meta">
+              <strong>Odhad univerza:</strong>{' '}
+              {typeof projectDetails.estimated_context_tokens === 'number'
+                ? `${projectDetails.estimated_context_tokens.toLocaleString('cs-CZ')} tokenů`
+                : 'N/A'}
+            </p>
+          )}
         </div>
       </header>
 
@@ -246,25 +311,34 @@ const ProjectDashboardPage = () => {
         <section className="project-dashboard__panel project-dashboard__panel--control" aria-label="Ovládací panel">
           <h2>Nová úloha</h2>
           <div className="task-forms">
-            <div className="task-forms__tabs" role="tablist" aria-label="Typy úloh">
-              <button
-                type="button"
-                role="tab"
-                aria-selected={activeTab === 'generate_and_process_story_from_seed'}
-                className={`task-forms__tab ${
-                  activeTab === 'generate_and_process_story_from_seed'
+          <div className="task-forms__tabs" role="tablist" aria-label="Typy úloh">
+            <button
+              type="button"
+              role="tab"
+              aria-selected={activeTab === 'generate_story'}
+              className={`task-forms__tab ${
+                  activeTab === 'generate_story'
                     ? 'task-forms__tab--active'
                     : ''
                 }`}
-                onClick={() => setActiveTab('generate_and_process_story_from_seed')}
-              >
-                Vygenerovat a zpracovat
-              </button>
-              <button
-                type="button"
-                role="tab"
-                aria-selected={activeTab === 'generate_saga'}
-                className={`task-forms__tab ${activeTab === 'generate_saga' ? 'task-forms__tab--active' : ''}`}
+              onClick={() => setActiveTab('generate_story')}
+            >
+              Vygenerovat příběh
+            </button>
+            <button
+              type="button"
+              role="tab"
+              aria-selected={activeTab === 'process_story'}
+              className={`task-forms__tab ${activeTab === 'process_story' ? 'task-forms__tab--active' : ''}`}
+              onClick={() => setActiveTab('process_story')}
+            >
+              Zpracovat existující
+            </button>
+            <button
+              type="button"
+              role="tab"
+              aria-selected={activeTab === 'generate_saga'}
+              className={`task-forms__tab ${activeTab === 'generate_saga' ? 'task-forms__tab--active' : ''}`}
                 onClick={() => setActiveTab('generate_saga')}
               >
                 Vytvořit ságu
@@ -275,11 +349,11 @@ const ProjectDashboardPage = () => {
               {formError && <div className="task-forms__alert task-forms__alert--error">{formError}</div>}
               {formMessage && <div className="task-forms__alert task-forms__alert--success">{formMessage}</div>}
 
-              {activeTab === 'generate_and_process_story_from_seed' && (
+              {activeTab === 'generate_story' && (
                 <form
                   className="task-form"
                   onSubmit={(event) =>
-                    handleSubmit(event, 'generate_and_process_story_from_seed')
+                    handleSubmit(event, 'generate_story')
                   }
                 >
                   <label className="task-form__label" htmlFor="seed-value">
@@ -292,6 +366,25 @@ const ProjectDashboardPage = () => {
                     value={seedValue}
                     onChange={(event) => setSeedValue(event.target.value)}
                     placeholder="Např. tajemná knihovna v horách"
+                  />
+                  <button type="submit" className="task-form__submit" disabled={isSubmitting}>
+                    {isSubmitting ? 'Odesílám…' : 'Odeslat'}
+                  </button>
+                </form>
+              )}
+
+              {activeTab === 'process_story' && (
+                <form className="task-form" onSubmit={handleProcessStorySubmit}>
+                  <label className="task-form__label" htmlFor="story-content">
+                    Text příběhu
+                  </label>
+                  <textarea
+                    id="story-content"
+                    className="task-form__textarea"
+                    rows={8}
+                    value={storyContent}
+                    onChange={(event) => setStoryContent(event.target.value)}
+                    placeholder="Vložte existující příběh k ověření a archivaci"
                   />
                   <button type="submit" className="task-form__submit" disabled={isSubmitting}>
                     {isSubmitting ? 'Odesílám…' : 'Odeslat'}
@@ -355,6 +448,12 @@ const ProjectDashboardPage = () => {
                 const files = task?.result?.files;
                 const hasStory = storyText.length > 0;
                 const hasFiles = files && Object.keys(files).length > 0;
+                const formatTokens = (value) =>
+                  typeof value === 'number' && Number.isFinite(value)
+                    ? value.toLocaleString('cs-CZ')
+                    : 'N/A';
+                const inputTokensDisplay = formatTokens(task?.total_input_tokens);
+                const outputTokensDisplay = formatTokens(task?.total_output_tokens);
 
                 return (
                   <article key={task.id} className="task-card">
@@ -366,6 +465,10 @@ const ProjectDashboardPage = () => {
                         <div className="task-card__status">
                           <span className="task-card__status-dot" style={{ backgroundColor: statusColor }} />
                           <span>{task.status || 'neznámý stav'}</span>
+                        </div>
+                        <div className="task-card__tokens">
+                          <span>Vstup: {inputTokensDisplay}</span>
+                          <span>Výstup: {outputTokensDisplay}</span>
                         </div>
                       </div>
                       <div className="task-card__actions">
@@ -440,6 +543,12 @@ const ProjectDashboardPage = () => {
               })}
             </div>
           )}
+          <p className="task-queue__note">
+            <small>
+              Poznámka: Limity služby Google AI Free Tier (např. 125&nbsp;000 vstupních tokenů za minutu) platí pro každou úlohu
+              a přehled najdete výše u jednotlivých záznamů.
+            </small>
+          </p>
         </section>
       </div>
 

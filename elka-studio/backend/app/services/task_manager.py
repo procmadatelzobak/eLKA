@@ -3,18 +3,37 @@
 from __future__ import annotations
 
 from copy import deepcopy
-from typing import Any, Callable
+from typing import Any, Callable, Tuple
 
+from celery import chain
 from celery.result import AsyncResult
 from sqlalchemy.orm import Session
 
-from app.celery_app import celery_app
 from app.db.redis_client import get_redis_client
 from app.db.session import SessionLocal
 from app.models.project import Project
 from app.models.task import Task, TaskStatus
 from app.core.context import app_context
 from app.services.ai_adapter_factory import AIAdapterFactory
+from app.tasks.base import dummy_task
+from app.tasks import lore_tasks
+
+
+TASK_MAPPING = {
+    "dummy": dummy_task,
+    "dummy_task": dummy_task,
+    "uce_process_story": lore_tasks.uce_process_story_task,
+    "uce_process_story_task": lore_tasks.uce_process_story_task,
+    "generate_story": lore_tasks.generate_story_from_seed_task,
+    "generate_story_from_seed": lore_tasks.generate_story_from_seed_task,
+    "generate_story_from_seed_task": lore_tasks.generate_story_from_seed_task,
+    "generate_and_process_story_from_seed": lore_tasks.generate_story_from_seed_task,
+    "generate_and_process_story_from_seed_task": lore_tasks.generate_story_from_seed_task,
+    "process_story": lore_tasks.process_story_task,
+    "process_story_task": lore_tasks.process_story_task,
+    "generate_saga": lore_tasks.generate_saga_task,
+    "generate_saga_task": lore_tasks.generate_saga_task,
+}
 
 
 class TaskManager:
@@ -30,12 +49,16 @@ class TaskManager:
         """Create a task record and dispatch the corresponding Celery job."""
 
         params = dict(params or {})
+        try:
+            project_id_int = int(project_id)
+        except (TypeError, ValueError) as exc:
+            raise ValueError("project_id must be an integer") from exc
         persisted_params = deepcopy(params)
-        params.setdefault("project_id", project_id)
+        params.setdefault("project_id", project_id_int)
         session = self._session_factory()
         try:
             task = Task(
-                project_id=project_id,
+                project_id=project_id_int,
                 type=task_type,
                 status=TaskStatus.PENDING,
                 params=persisted_params or None,
@@ -44,8 +67,16 @@ class TaskManager:
             session.commit()
             session.refresh(task)
 
-            async_result = self._dispatch_to_celery(task_type, task.id, params)
-            task.celery_task_id = async_result.id
+            async_result, tracking_result = self._dispatch_to_celery(
+                task_type, task.id, params
+            )
+            task.celery_task_id = tracking_result.id
+            if async_result.id != tracking_result.id:
+                existing_result = task.result or {}
+                if not isinstance(existing_result, dict):
+                    existing_result = {}
+                existing_result.update({"processing_celery_task_id": async_result.id})
+                task.result = existing_result
             session.add(task)
             session.commit()
             session.refresh(task)
@@ -97,6 +128,36 @@ class TaskManager:
         if project_id is not None:
             self._broadcast_update(project_id)
 
+    def update_task_status_by_db_id(
+        self,
+        task_db_id: int,
+        status: str,
+        progress: int | None = None,
+        log_message: str | None = None,
+        result: dict[str, Any] | None = None,
+    ) -> None:
+        """Helper to update task status when only the database ID is known."""
+
+        session = self._session_factory()
+        celery_task_id: str | None = None
+        try:
+            task = session.query(Task).filter(Task.id == task_db_id).one_or_none()
+            if task and task.celery_task_id:
+                celery_task_id = task.celery_task_id
+        finally:
+            session.close()
+
+        if not celery_task_id:
+            return
+
+        self.update_task_status(
+            celery_task_id,
+            status,
+            progress=progress,
+            log_message=log_message,
+            result=result,
+        )
+
     def approve_task(self, task_id: int, session: Session | None = None) -> Task:
         """Mark the task result as approved and finalise any pending changes."""
 
@@ -131,31 +192,61 @@ class TaskManager:
         self.broadcast_update(task.project_id)
         return final_task
 
-    def _dispatch_to_celery(self, task_type: str, task_db_id: int, params: dict) -> AsyncResult:
+    def _dispatch_to_celery(
+        self, task_type: str, task_db_id: int, params: dict
+    ) -> Tuple[AsyncResult, AsyncResult]:
         """Map task types to Celery jobs and enqueue the appropriate task."""
 
-        task_name = self._resolve_task_name(task_type)
-        return celery_app.send_task(task_name, args=[task_db_id], kwargs=params)
-
-    def _resolve_task_name(self, task_type: str) -> str:
-        """Translate a logical task type into a Celery task name."""
-
-        task_map = {
-            "dummy": "app.tasks.dummy_task",
-            "dummy_task": "app.tasks.dummy_task",
-            "uce_process_story": "app.tasks.lore_tasks.uce_process_story_task",
-            "uce_process_story_task": "app.tasks.lore_tasks.uce_process_story_task",
-            "generate_story": "app.tasks.lore_tasks.generate_and_process_story_from_seed_task",
-            "generate_story_from_seed": "app.tasks.lore_tasks.generate_and_process_story_from_seed_task",
-            "generate_story_from_seed_task": "app.tasks.lore_tasks.generate_and_process_story_from_seed_task",
-            "generate_and_process_story_from_seed": "app.tasks.lore_tasks.generate_and_process_story_from_seed_task",
-            "generate_and_process_story_from_seed_task": "app.tasks.lore_tasks.generate_and_process_story_from_seed_task",
-            "generate_saga": "app.tasks.lore_tasks.generate_saga_task",
-            "generate_saga_task": "app.tasks.lore_tasks.generate_saga_task",
-        }
-        if task_type not in task_map:
+        if task_type not in TASK_MAPPING:
             raise ValueError(f"Unknown task type '{task_type}'.")
-        return task_map[task_type]
+
+        if task_type in {
+            "generate_story",
+            "generate_story_from_seed",
+            "generate_story_from_seed_task",
+            "generate_and_process_story_from_seed",
+            "generate_and_process_story_from_seed_task",
+        }:
+            return self._dispatch_generate_story_chain(task_db_id, params)
+
+        if task_type == "process_story":
+            story_content = params.get("story_content")
+            if not isinstance(story_content, str) or not story_content.strip():
+                raise ValueError("story_content must be a non-empty string")
+
+        task = TASK_MAPPING[task_type]
+        async_result = task.apply_async(args=[task_db_id], kwargs=params)
+        return async_result, async_result
+
+    def _dispatch_generate_story_chain(
+        self, task_db_id: int, params: dict
+    ) -> Tuple[AsyncResult, AsyncResult]:
+        project_id = params.get("project_id")
+        seed = params.get("seed")
+        pr_id = params.get("pr_id")
+
+        try:
+            project_id = int(project_id)
+        except (TypeError, ValueError) as exc:
+            raise ValueError("project_id is required for story generation") from exc
+        if not isinstance(seed, str) or not seed.strip():
+            raise ValueError("seed must be a non-empty string")
+
+        generate_sig = lore_tasks.generate_story_from_seed_task.s(
+            task_db_id,
+            project_id=project_id,
+            seed=seed,
+            pr_id=pr_id,
+        )
+        process_sig = lore_tasks.process_story_task.s(
+            project_id=project_id,
+            pr_id=pr_id,
+        )
+
+        workflow = chain(generate_sig, process_sig)
+        async_result = workflow.apply_async()
+        tracking_result = async_result.parent or async_result
+        return async_result, tracking_result
 
     def _broadcast_update(self, project_id: int) -> None:
         """Publish task update notifications to Redis for websocket listeners."""

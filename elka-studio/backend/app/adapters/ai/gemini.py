@@ -37,10 +37,38 @@ class GeminiAdapter(BaseAIAdapter):
             return model_key
         return self.model
 
-    def generate_text(self, prompt: str, model_key: str | None = None) -> str:
+    def _extract_usage_metadata(self, response: object) -> dict | None:
+        usage = getattr(response, "usage_metadata", None)
+        if usage is None:
+            return None
+        prompt_tokens = getattr(usage, "prompt_token_count", None) or getattr(
+            usage, "prompt_tokens", 0
+        )
+        candidate_tokens = getattr(
+            usage, "candidates_token_count", None
+        ) or getattr(usage, "candidates_tokens", 0)
+        metadata = {
+            "prompt_token_count": int(prompt_tokens or 0),
+            "candidates_token_count": int(candidate_tokens or 0),
+        }
+        total = getattr(usage, "total_token_count", None) or getattr(
+            usage, "total_tokens", None
+        )
+        if total is not None:
+            metadata["total_tokens"] = int(total)
+        else:
+            metadata["total_tokens"] = metadata["prompt_token_count"] + metadata[
+                "candidates_token_count"
+            ]
+        return metadata
+
+    def generate_text(
+        self, prompt: str, model_key: str | None = None
+    ) -> tuple[str, dict | None]:
         model_name = self._resolve_model(model_key)
         response = self._client.models.generate_content(model=model_name, contents=prompt)
-        return getattr(response, "text", "")
+        metadata = self._extract_usage_metadata(response)
+        return getattr(response, "text", ""), metadata
 
     def analyse(
         self,
@@ -64,7 +92,9 @@ class GeminiAdapter(BaseAIAdapter):
         else:
             prompt = story_content
 
-        response = self._client.models.generate_content(model=self._resolve_model(), contents=prompt)
+        response = self._client.models.generate_content(
+            model=self._resolve_model(), contents=prompt
+        )
         return getattr(response, "text", str(response))
 
     def summarise(self, story_content: str) -> str:  # type: ignore[override]
@@ -81,13 +111,16 @@ class GeminiAdapter(BaseAIAdapter):
         """Generate Markdown content using the Gemini model."""
 
         contents = instruction if not context else f"{instruction}\n\nCONTEXT:\n{context}"
-        return self.generate_text(contents)
+        text, _ = self.generate_text(contents)
+        return text
 
-    def generate_json(self, system: str, user: str, model_key: str | None = None) -> str:
+    def generate_json(
+        self, system: str, user: str, model_key: str | None = None
+    ) -> tuple[str, dict | None]:
         """Return JSON-formatted text by combining system and user prompts."""
 
         prompt = f"{system}\n\n{user}"
-        text = self.generate_text(prompt, model_key=model_key)
+        text, metadata = self.generate_text(prompt, model_key=model_key)
         try:
             json.loads(text)
         except json.JSONDecodeError as exc:
@@ -97,7 +130,20 @@ class GeminiAdapter(BaseAIAdapter):
         except Exception as exc:  # pragma: no cover - defensive logging
             logger.error("Error processing Gemini JSON response: %s", exc)
             raise
-        return text
+        return text, metadata
+
+    def count_tokens(self, text: str) -> int:
+        try:
+            model = getattr(self, "_counting_model", None)
+            if model is None:
+                counting_model_name = self._resolve_model(self.config.validator_model())
+                self._counting_model = self._client.models.get(counting_model_name)
+                model = self._counting_model
+            response = model.count_tokens(contents=text)
+            return int(getattr(response, "total_tokens", 0))
+        except Exception as exc:  # pragma: no cover - depends on external service
+            logger.error("Failed to count tokens: %s", exc)
+            return 0
 
 
 __all__ = ["GeminiAdapter"]

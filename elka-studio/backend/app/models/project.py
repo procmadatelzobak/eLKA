@@ -23,6 +23,7 @@ class Project(Base):
     git_url: Mapped[str | None] = Column(String(500), nullable=True)
     local_path: Mapped[str | None] = Column(String(500), nullable=True)
     git_token: Mapped[str | None] = Column(Text, nullable=True)
+    estimated_context_tokens: Mapped[int | None] = Column(Integer, nullable=True)
 
     settings: Mapped[list["Setting"]] = relationship(
         "Setting", back_populates="project", cascade="all, delete-orphan"
@@ -38,6 +39,7 @@ class Project(Base):
             "name": self.name,
             "git_url": self.git_url,
             "local_path": self.local_path,
+            "estimated_context_tokens": self.estimated_context_tokens,
         }
 
 

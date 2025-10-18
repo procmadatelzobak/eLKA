@@ -24,6 +24,8 @@ export const getApiClient = () => {
 
 export const getProjects = () => getApiClient().get('/projects/');
 
+export const getProject = (projectId) => getApiClient().get(`/projects/${projectId}`);
+
 export const createProject = (projectData) => getApiClient().post('/projects/', projectData);
 
 export const createTask = (taskData) => getApiClient().post('/tasks/', taskData);

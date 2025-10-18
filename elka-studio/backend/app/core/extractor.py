@@ -108,7 +108,7 @@ def extract_fact_graph(
                 "Respond with compact JSON matching the requested schema."
             )
             try:
-                result = ai.generate_json(system_prompt, prompt)  # type: ignore[arg-type]
+                result, _ = ai.generate_json(system_prompt, prompt)  # type: ignore[arg-type]
             except Exception as exc:  # pragma: no cover - adapter specific
                 last_error = exc
                 continue

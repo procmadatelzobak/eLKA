@@ -42,10 +42,10 @@ class DummyAIAdapter(BaseAIAdapter):
     def generate_markdown(self, instruction: str, context: str | None = None) -> str:  # pragma: no cover - unused
         return (context or instruction).strip()
 
-    def generate_json(self, system: str, user: str) -> str:  # type: ignore[override]
+    def generate_json(self, system: str, user: str):  # type: ignore[override]
         index = min(self._json_calls, len(self._json_responses) - 1)
         self._json_calls += 1
-        return self._json_responses[index]
+        return self._json_responses[index], None
 
 
 class RetryingAIAdapter(BaseAIAdapter):
@@ -62,10 +62,10 @@ class RetryingAIAdapter(BaseAIAdapter):
     def summarise(self, story_content: str) -> str:  # pragma: no cover - unused
         return "summary"
 
-    def generate_json(self, system: str, user: str) -> str:  # type: ignore[override]
+    def generate_json(self, system: str, user: str):  # type: ignore[override]
         response = self._responses[self._calls]
         self._calls = min(self._calls + 1, len(self._responses) - 1)
-        return response
+        return response, None
 
 
 class ValidationRetryAdapter(BaseAIAdapter):
@@ -83,11 +83,11 @@ class ValidationRetryAdapter(BaseAIAdapter):
     def summarise(self, story_content: str) -> str:  # pragma: no cover - unused
         return "summary"
 
-    def generate_json(self, system: str, user: str) -> str:  # type: ignore[override]
+    def generate_json(self, system: str, user: str):  # type: ignore[override]
         self.prompts.append(user)
         response = self._responses[self._index]
         self._index = min(self._index + 1, len(self._responses) - 1)
-        return response
+        return response, None
 
 
 class LegendAIAdapter(BaseAIAdapter):
@@ -103,8 +103,8 @@ class LegendAIAdapter(BaseAIAdapter):
     def summarise(self, story_content: str) -> str:  # pragma: no cover - unused
         return "summary"
 
-    def generate_json(self, system: str, user: str) -> str:  # type: ignore[override]
-        return json.dumps(self._payload)
+    def generate_json(self, system: str, user: str):  # type: ignore[override]
+        return json.dumps(self._payload), None
 
 
 @pytest.fixture()
@@ -226,8 +226,8 @@ def test_plan_changes_uses_writer_for_body(universe_repo: Path) -> None:
             self.calls.append((instruction, context))
             return "Generated lore body"
 
-        def generate_json(self, system: str, user: str) -> str:  # pragma: no cover - unused
-            return "{}"
+        def generate_json(self, system: str, user: str):  # pragma: no cover - unused
+            return "{}", None
 
     writer = RecordingWriter()
     incoming = FactGraph(entities=[FactEntity(id="artifact", type="artifact", summary="Ancient key")])
@@ -279,7 +279,7 @@ def test_validate_universe_loads_template_truths() -> None:
             super().__init__([{"message": "conflict", "refs": ["fall"], "level": "error"}])
             self.last_truths: list[str] = []
 
-        def generate_json(self, system: str, user: str) -> str:  # type: ignore[override]
+        def generate_json(self, system: str, user: str):  # type: ignore[override]
             payload = json.loads(user)
             self.last_truths = payload.get("truths", [])
             return super().generate_json(system, user)
