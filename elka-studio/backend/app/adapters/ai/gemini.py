@@ -151,43 +151,7 @@ class GeminiAdapter(BaseAIAdapter):
                 model=model_name, contents=prompt
             )
         except ResourceExhausted as exc:
-            logger.warning(
-                "Gemini rate limit hit during text generation: %s",
-                exc,
-            )
-            limit_type = "Token Count" if "token_count" in str(exc) else "Request Rate (RPM)"
-            logger.warning(
-                "Detected Limit Type: %s. Consider adjusting context size or RPM config.",
-                limit_type,
-            )
-            delay_seconds = self._parse_retry_delay(exc)
-            logger.info(
-                "Rate limit triggered. Will request Celery task retry in %s seconds.",
-                delay_seconds,
-            )
-
-            from celery import current_task, exceptions
-
-            if current_task:
-                try:
-                    raise current_task.retry(
-                        exc=exc, countdown=delay_seconds, max_retries=5
-                    )
-                except exceptions.MaxRetriesExceededError:
-                    logger.error("Max retries exceeded for rate limit. Task will fail.")
-                    raise exc
-                except Exception as retry_exc:  # pragma: no cover - defensive logging
-                    logger.error(
-                        "Error during Celery retry attempt: %s",
-                        retry_exc,
-                    )
-                    raise exc
-            else:
-                logger.warning(
-                    "Not running within a Celery task context, re-raising ResourceExhausted."
-                )
-                raise exc
-            raise exc
+            self._handle_rate_limit(exc, operation="text generation")
         metadata = self._extract_usage_metadata(response)
         return getattr(response, "text", ""), metadata
 
@@ -219,8 +183,7 @@ class GeminiAdapter(BaseAIAdapter):
                 model=self._resolve_model(), contents=prompt
             )
         except ResourceExhausted as exc:
-            logger.warning("Gemini rate limit reached during analysis: %s", exc)
-            raise
+            self._handle_rate_limit(exc, operation="analysis")
         return getattr(response, "text", str(response))
 
     def summarise(self, story_content: str) -> str:  # type: ignore[override]
@@ -249,43 +212,7 @@ class GeminiAdapter(BaseAIAdapter):
         try:
             text, metadata = self.generate_text(prompt, model_key=model_key)
         except ResourceExhausted as exc:
-            logger.warning(
-                "Gemini rate limit hit during JSON generation: %s",
-                exc,
-            )
-            limit_type = "Token Count" if "token_count" in str(exc) else "Request Rate (RPM)"
-            logger.warning(
-                "Detected Limit Type: %s. Consider adjusting context size or RPM config.",
-                limit_type,
-            )
-            delay_seconds = self._parse_retry_delay(exc)
-            logger.info(
-                "Rate limit triggered. Will request Celery task retry in %s seconds.",
-                delay_seconds,
-            )
-
-            from celery import current_task, exceptions
-
-            if current_task:
-                try:
-                    raise current_task.retry(
-                        exc=exc, countdown=delay_seconds, max_retries=5
-                    )
-                except exceptions.MaxRetriesExceededError:
-                    logger.error("Max retries exceeded for rate limit. Task will fail.")
-                    raise exc
-                except Exception as retry_exc:  # pragma: no cover - defensive logging
-                    logger.error(
-                        "Error during Celery retry attempt: %s",
-                        retry_exc,
-                    )
-                    raise exc
-            else:
-                logger.warning(
-                    "Not running within a Celery task context, re-raising ResourceExhausted."
-                )
-                raise exc
-            raise exc
+            self._handle_rate_limit(exc, operation="JSON generation")
         try:
             json.loads(text)
         except json.JSONDecodeError as exc:
@@ -355,6 +282,41 @@ class GeminiAdapter(BaseAIAdapter):
         except Exception as exc:  # pragma: no cover - depends on external service
             logger.error("Failed to count tokens: %s", exc)
             return 0
+
+    def _handle_rate_limit(self, exc: ResourceExhausted, operation: str) -> None:
+        """Centralised handling for Gemini rate limit responses."""
+
+        logger.warning("Gemini rate limit hit during %s: %s", operation, exc)
+        limit_type = "Token Count" if "token_count" in str(exc) else "Request Rate (RPM)"
+        logger.warning(
+            "Detected Limit Type: %s. Consider adjusting context size or RPM config.",
+            limit_type,
+        )
+
+        delay_seconds = self._parse_retry_delay(exc)
+        logger.info(
+            "Rate limit triggered. Will request Celery task retry in %s seconds.",
+            delay_seconds,
+        )
+
+        from celery import current_task, exceptions
+
+        if current_task:
+            try:
+                raise current_task.retry(exc=exc, countdown=delay_seconds, max_retries=5)
+            except exceptions.MaxRetriesExceededError:
+                logger.error("Max retries exceeded for rate limit. Task will fail.")
+                raise exc
+            except Exception as retry_exc:  # pragma: no cover - defensive logging
+                logger.error("Error during Celery retry attempt: %s", retry_exc)
+                raise exc
+        else:
+            logger.warning(
+                "Not running within a Celery task context, re-raising ResourceExhausted."
+            )
+            raise exc
+
+        raise exc
 
 
 __all__ = ["GeminiAdapter"]
