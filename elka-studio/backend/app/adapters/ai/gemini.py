@@ -5,10 +5,11 @@ import os
 import re
 import time
 from dataclasses import dataclass
-from typing import Dict
+from typing import Any, Dict
 
 from google import genai
 from google.api_core.exceptions import ResourceExhausted
+from google.genai.errors import ClientError
 from limits import RateLimitItemPerMinute
 from limits.storage import MemoryStorage, RedisStorage
 from limits.strategies import MovingWindowRateLimiter
@@ -18,6 +19,10 @@ from app.utils.config import Config
 
 
 logger = logging.getLogger(__name__)
+
+
+class GeminiRateLimitError(RuntimeError):
+    """Pickle-friendly wrapper for Celery retries triggered by Gemini quotas."""
 
 
 @dataclass(slots=True)
@@ -150,7 +155,7 @@ class GeminiAdapter(BaseAIAdapter):
             response = self._client.models.generate_content(
                 model=model_name, contents=prompt
             )
-        except ResourceExhausted as exc:
+        except (ResourceExhausted, ClientError) as exc:
             self._handle_rate_limit(exc, operation="text generation")
         metadata = self._extract_usage_metadata(response)
         return getattr(response, "text", ""), metadata
@@ -182,7 +187,7 @@ class GeminiAdapter(BaseAIAdapter):
             response = self._client.models.generate_content(
                 model=self._resolve_model(), contents=prompt
             )
-        except ResourceExhausted as exc:
+        except (ResourceExhausted, ClientError) as exc:
             self._handle_rate_limit(exc, operation="analysis")
         return getattr(response, "text", str(response))
 
@@ -211,7 +216,7 @@ class GeminiAdapter(BaseAIAdapter):
         prompt = f"{system}\n\n{user}"
         try:
             text, metadata = self.generate_text(prompt, model_key=model_key)
-        except ResourceExhausted as exc:
+        except (ResourceExhausted, ClientError) as exc:
             self._handle_rate_limit(exc, operation="JSON generation")
         try:
             json.loads(text)
@@ -224,7 +229,67 @@ class GeminiAdapter(BaseAIAdapter):
             raise
         return text, metadata
 
-    def _parse_retry_delay(self, exc: ResourceExhausted) -> int:
+    def _is_rate_limit_error(self, exc: Exception) -> bool:
+        if isinstance(exc, ResourceExhausted):
+            return True
+
+        if isinstance(exc, ClientError):
+            code = getattr(exc, "code", None)
+            status = (getattr(exc, "status", "") or "").upper()
+            message = (getattr(exc, "message", "") or str(exc)).upper()
+            if code == 429:
+                return True
+            if "RESOURCE_EXHAUSTED" in status:
+                return True
+            if "QUOTA" in message or "RATE" in message:
+                return True
+
+        return False
+
+    def _coerce_retry_seconds(self, value: object) -> int | None:
+        if value is None:
+            return None
+
+        if isinstance(value, (int, float)):
+            if value > 0:
+                return max(int(value), 1)
+            return None
+
+        if isinstance(value, str):
+            match = re.search(r"(\d+(?:\.\d+)?)", value)
+            if match:
+                seconds = float(match.group(1))
+                if seconds > 0:
+                    return max(int(seconds), 1)
+            return None
+
+        return None
+
+    def _extract_retry_seconds(self, container: object) -> int | None:
+        seconds = self._coerce_retry_seconds(container)
+        if seconds is not None:
+            return seconds
+
+        if isinstance(container, dict):
+            for key in ("retry_delay", "retryDelay", "retry-after", "retry_after"):
+                if key in container:
+                    seconds = self._coerce_retry_seconds(container[key])
+                    if seconds is not None:
+                        return seconds
+            for value in container.values():
+                seconds = self._extract_retry_seconds(value)
+                if seconds is not None:
+                    return seconds
+
+        if isinstance(container, (list, tuple, set)):
+            for item in container:
+                seconds = self._extract_retry_seconds(item)
+                if seconds is not None:
+                    return seconds
+
+        return None
+
+    def _parse_retry_delay(self, exc: ResourceExhausted | ClientError) -> int:
         """Best-effort extraction of retry delay seconds from Gemini errors."""
 
         default_delay = max(int(self._rate_limit_sleep or 1.0), 5)
@@ -243,48 +308,51 @@ class GeminiAdapter(BaseAIAdapter):
             except (TypeError, ValueError):
                 pass
 
-        metadata = getattr(exc, "errors", None)
-        if isinstance(metadata, list):
-            for error in metadata:
-                if isinstance(error, dict):
-                    for key in ("retry_delay", "retryDelay", "retry-after", "retry_after"):
-                        value = error.get(key)
-                        if value is None:
-                            continue
-                        if isinstance(value, (int, float)) and value > 0:
-                            return int(value)
-                        if isinstance(value, str):
-                            match = re.search(r"(\d+(?:\.\d+)?)", value)
-                            if match:
-                                seconds = float(match.group(1))
-                                if seconds > 0:
-                                    return max(int(seconds), 1)
+        metadata_sources: list[Any] = []
+        details = getattr(exc, "details", None)
+        if details:
+            metadata_sources.append(details)
+            if isinstance(details, dict) and "error" in details:
+                metadata_sources.append(details["error"])
+
+        errors_attr = getattr(exc, "errors", None)
+        if errors_attr:
+            metadata_sources.append(errors_attr)
+
+        for source in metadata_sources:
+            seconds = self._extract_retry_seconds(source)
+            if seconds is not None:
+                return seconds
 
         message = str(exc)
-        match = re.search(r"retry\s*(?:in|after)\s*(\d+)", message, re.IGNORECASE)
+        match = re.search(r"retry\s*(?:in|after)\s*(\d+(?:\.\d+)?)", message, re.IGNORECASE)
         if match:
-            seconds = int(match.group(1))
+            seconds = float(match.group(1))
             if seconds > 0:
-                return seconds
+                return max(int(seconds), 1)
 
         return default_delay
 
     def count_tokens(self, text: str) -> int:
         try:
-            model = getattr(self, "_counting_model", None)
-            if model is None:
-                counting_model_name = self._resolve_model(self.config.validator_model())
-                self._counting_model = self._client.models.get(counting_model_name)
-                model = self._counting_model
+            counting_model_name = self._resolve_model(self.config.validator_model())
             self._wait_for_rate_limit()
-            response = model.count_tokens(contents=text)
+            response = self._client.models.count_tokens(
+                model=counting_model_name,
+                contents=text,
+            )
             return int(getattr(response, "total_tokens", 0))
         except Exception as exc:  # pragma: no cover - depends on external service
             logger.error("Failed to count tokens: %s", exc)
             return 0
 
-    def _handle_rate_limit(self, exc: ResourceExhausted, operation: str) -> None:
+    def _handle_rate_limit(
+        self, exc: ResourceExhausted | ClientError, operation: str
+    ) -> None:
         """Centralised handling for Gemini rate limit responses."""
+
+        if not self._is_rate_limit_error(exc):
+            raise exc
 
         logger.warning("Gemini rate limit hit during %s: %s", operation, exc)
         limit_type = "Token Count" if "token_count" in str(exc) else "Request Rate (RPM)"
@@ -303,7 +371,11 @@ class GeminiAdapter(BaseAIAdapter):
 
         if current_task:
             try:
-                raise current_task.retry(exc=exc, countdown=delay_seconds, max_retries=5)
+                raise current_task.retry(
+                    exc=GeminiRateLimitError(str(exc)),
+                    countdown=delay_seconds,
+                    max_retries=5,
+                )
             except exceptions.MaxRetriesExceededError:
                 logger.error("Max retries exceeded for rate limit. Task will fail.")
                 raise exc
