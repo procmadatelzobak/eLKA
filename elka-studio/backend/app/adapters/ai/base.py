@@ -16,7 +16,12 @@ class BaseAIAdapter(ABC):
         self.config = config
 
     @abstractmethod
-    def analyse(self, story_content: str, aspect: str) -> Dict[str, Any]:
+    def analyse(
+        self,
+        story_content: str,
+        aspect: str,
+        context: str | None = None,
+    ) -> Dict[str, Any]:
         """Return a structured analysis of the story for the requested aspect."""
 
     @abstractmethod
@@ -46,7 +51,18 @@ class HeuristicAIAdapter(BaseAIAdapter):
     def __post_init__(self) -> None:  # pragma: no cover - dataclass compatibility
         BaseAIAdapter.__init__(self, self.config)
 
-    def analyse(self, story_content: str, aspect: str) -> Dict[str, Any]:
+    def analyse(
+        self,
+        story_content: str,
+        aspect: str,
+        context: str | None = None,
+    ) -> Dict[str, Any]:
+        # The heuristic adapter does not currently use the optional context but the
+        # parameter is accepted to maintain API parity with provider-backed
+        # adapters that rely on it for richer analysis.
+        if context is not None:
+            _ = context  # Preserve the argument for interface compatibility.
+
         cleaned = story_content.strip()
         word_count = len(cleaned.split())
         aspect_lower = aspect.lower()

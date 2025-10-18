@@ -4,8 +4,10 @@ from __future__ import annotations
 
 import difflib
 import json
+import os
 import time
 from datetime import datetime
+from pathlib import Path
 from textwrap import dedent
 
 from celery.utils.log import get_task_logger
@@ -14,7 +16,7 @@ from app.adapters.ai.base import get_ai_adapters
 from app.celery_app import celery_app
 from app.core.context import app_context
 from app.core.archivist import load_universe
-from app.core.extractor import _slugify, extract_fact_graph
+from app.core.extractor import extract_fact_graph
 from app.core.planner import plan_changes
 from app.core.validator import validate_universe
 from app.db.session import SessionLocal
@@ -256,150 +258,15 @@ def uce_process_story_task(
         raise
 
 
-@celery_app.task(bind=True, name="app.tasks.lore_tasks.process_story_task")
-def process_story_task(
-    self,
-    task_db_id: int,
-    project_id: int,
-    story_content: str,
-    pr_id: int | None = None,
-) -> None:
-    """Execute the story validation and archival pipeline."""
-
-    manager = TaskManager()
-    celery_task_id = self.request.id
-
-    manager.update_task_status(
-        celery_task_id,
-        TaskStatus.RUNNING,
-        progress=5,
-        log_message=f"Task {task_db_id}: starting story processing pipeline.",
-    )
-
-    try:
-        project = app_context.git_manager.get_project_from_db(project_id)
-        manager.update_task_status(
-            celery_task_id,
-            TaskStatus.RUNNING,
-            progress=10,
-            log_message=f"Loaded project '{project.name}'. Preparing adapters...",
-        )
-
-        git_adapter = app_context.create_git_adapter(project)
-        if pr_id is not None:
-            logger.debug(
-                "process_story_task %s operating on project %s for PR %s",
-                task_db_id,
-                project.id,
-                pr_id,
-            )
-        archivist = app_context.create_archivist(git_adapter)
-        validator = app_context.validator
-
-        project_path = app_context.git_manager.resolve_project_path(project)
-        universe_files = app_context.git_manager.load_universe_files(project_path)
-
-        manager.update_task_status(
-            celery_task_id,
-            TaskStatus.RUNNING,
-            progress=25,
-            log_message="Validating story content...",
-        )
-
-        validation_report = validator.validate(story_content, universe_files)
-        for step in validation_report.steps:
-            manager.update_task_status(
-                celery_task_id,
-                TaskStatus.RUNNING,
-                progress=35,
-                log_message=step.summary(),
-            )
-
-        if not validation_report.passed:
-            messages = " | ".join(validation_report.failed_messages())
-            manager.update_task_status(
-                celery_task_id,
-                TaskStatus.FAILURE,
-                progress=40,
-                log_message=f"Validation failed: {messages}",
-            )
-            return
-
-        manager.update_task_status(
-            celery_task_id,
-            TaskStatus.RUNNING,
-            progress=55,
-            log_message="Validation passed. Archiving story...",
-        )
-
-        archive_result = archivist.archive(story_content, universe_files)
-        files_to_commit: dict[str, str] = dict(archive_result.files)
-
-        for message in archive_result.log_messages:
-            manager.update_task_status(
-                celery_task_id,
-                TaskStatus.RUNNING,
-                progress=65,
-                log_message=message,
-            )
-
-        if not files_to_commit:
-            manager.update_task_status(
-                celery_task_id,
-                TaskStatus.FAILURE,
-                progress=70,
-                log_message="Archival produced no files to commit.",
-            )
-            return
-
-        manager.update_task_status(
-            celery_task_id,
-            TaskStatus.RUNNING,
-            progress=75,
-            log_message="Prepared files for commit.",
-            result={
-                "files": files_to_commit,
-                "metadata": archive_result.metadata,
-            },
-        )
-
-        commit_summary = archive_result.metadata.get("summary", "New story")
-        commit_message = f"Add lore entry: {commit_summary}"
-
-        manager.update_task_status(
-            celery_task_id,
-            TaskStatus.RUNNING,
-            progress=80,
-            log_message="Committing story to project repository...",
-        )
-
-        git_adapter.update_pr_branch(files=files_to_commit, commit_message=commit_message)
-
-        manager.update_task_status(
-            celery_task_id,
-            TaskStatus.SUCCESS,
-            progress=100,
-            log_message="Story processed, validated, archived, and pushed successfully.",
-        )
-    except Exception as exc:  # pragma: no cover - defensive logging
-        logger.exception("process_story_task failed: %s", exc)
-        manager.update_task_status(
-            celery_task_id,
-            TaskStatus.FAILURE,
-            log_message=f"Task {task_db_id} failed: {exc}",
-        )
-        raise
-
-
-@celery_app.task(bind=True, name="app.tasks.lore_tasks.generate_story_from_seed_task")
-def generate_story_from_seed_task(
+@celery_app.task(bind=True, name="app.tasks.lore_tasks.generate_and_process_story_from_seed_task")
+def generate_and_process_story_from_seed_task(
     self,
     task_db_id: int,
     project_id: int,
     seed: str,
     pr_id: int | None = None,
 ) -> None:
-    """Generate a story from a seed idea and enqueue processing."""
+    """Generate, validate, and archive a story from a seed idea."""
 
     manager = TaskManager()
     celery_task_id = self.request.id
@@ -413,44 +280,110 @@ def generate_story_from_seed_task(
 
     try:
         project = app_context.git_manager.get_project_from_db(project_id)
-        project_path = app_context.git_manager.resolve_project_path(project)
+        project_path = Path(app_context.git_manager.resolve_project_path(project))
 
         manager.update_task_status(
             celery_task_id,
             TaskStatus.RUNNING,
             progress=15,
-            log_message=f"Loaded project '{project.name}'. Gathering universe context...",
+            log_message=(
+                f"Loaded project '{project.name}'. Loading full universe context..."
+            ),
         )
 
-        try:
-            current_graph = load_universe(project_path)
-            # Prepare a concise context summary for the prompt
-            context_summary = "Existing Universe Context:\n"
-            if current_graph.core_truths:
-                context_summary += "- Core Truths: " + "; ".join(current_graph.core_truths) + "\n"
-            # Optional: Add summaries of key entities or recent events if needed, be mindful of token limits
-            # Example (limit to 5 entities):
-            # if current_graph.entities:
-            #     context_summary += "- Key Entities: " + ", ".join([e.id for e in current_graph.entities[:5]]) + "\n"
-            # Example (limit to 5 events):
-            # if current_graph.events:
-            #     context_summary += "- Recent Events: " + ", ".join([e.title for e in current_graph.events[-5:]]) + "\n"
+        include_dirs = ["Objekty", "Legendy", "Pokyny", "Příběhy"]
+        include_files = ["timeline.txt", "timeline.md", "README.txt", "README.md"]
 
-        except Exception as e:
-            logger.warning(f"Could not load universe context for project {project_id}: {e}")
-            context_summary = "Could not load universe context.\n"
+        env_dirs = os.getenv("ELKA_UNIVERSE_CONTEXT_DIRS")
+        if env_dirs:
+            include_dirs = [
+                entry.strip()
+                for entry in env_dirs.split(os.pathsep)
+                if entry.strip()
+            ] or include_dirs
+
+        env_files = os.getenv("ELKA_UNIVERSE_CONTEXT_FILES")
+        if env_files:
+            include_files = [
+                entry.strip()
+                for entry in env_files.split(os.pathsep)
+                if entry.strip()
+            ] or include_files
+
+        full_context_string = ""
+        try:
+            for item_name in include_dirs:
+                item_path = project_path / item_name
+                if not item_path.is_dir():
+                    continue
+                for pattern in ("*.txt", "*.md"):
+                    for filepath in item_path.rglob(pattern):
+                        if not filepath.is_file():
+                            continue
+                        relative_path = filepath.relative_to(project_path)
+                        full_context_string += (
+                            f"--- START FILE: {relative_path} ---\n"
+                        )
+                        try:
+                            full_context_string += (
+                                filepath.read_text(encoding="utf-8") + "\n"
+                            )
+                        except Exception as exc:  # pragma: no cover - filesystem interaction
+                            logger.warning(
+                                "Could not read file %s: %s", filepath, exc
+                            )
+                        full_context_string += (
+                            f"--- END FILE: {relative_path} ---\n\n"
+                        )
+
+            for file_name in include_files:
+                if not file_name:
+                    continue
+                file_path = project_path / file_name
+                if not file_path.is_file():
+                    continue
+                full_context_string += f"--- START FILE: {file_name} ---\n"
+                try:
+                    full_context_string += file_path.read_text(encoding="utf-8") + "\n"
+                except Exception as exc:  # pragma: no cover - filesystem interaction
+                    logger.warning("Could not read file %s: %s", file_path, exc)
+                full_context_string += f"--- END FILE: {file_name} ---\n\n"
+
+            if not full_context_string:
+                full_context_string = "No universe context files found or loaded."
+                logger.warning("Universe context is empty for project %s.", project_id)
+            else:
+                word_count = len(full_context_string.split())
+                logger.info(
+                    "Loaded full context for project %s (approx. %s words).",
+                    project_id,
+                    word_count,
+                )
+        except Exception as exc:  # pragma: no cover - filesystem interaction
+            logger.error(
+                "Failed to load full universe context for project %s: %s",
+                project_id,
+                exc,
+            )
+            full_context_string = f"Error loading universe context: {exc}"
 
         manager.update_task_status(
             celery_task_id,
             TaskStatus.RUNNING,
-            progress=25,
-            log_message="Universe context loaded. Preparing AI adapter...",
+            progress=30,
+            log_message="Full universe context loaded. Preparing AI adapter...",
         )
 
         model_key = manager.config.get_model_key_for_task("generation")
         model_name = manager.config.get_model_name_for_task("generation")
-        adapter_name = "heuristic" if model_key == "heuristic" else manager.config.get_default_adapter()
-        ai_adapter = manager.ai_adapter_factory.get_adapter(adapter_name, model_key=model_key)
+        adapter_name = (
+            "heuristic"
+            if model_key == "heuristic"
+            else manager.config.get_default_adapter()
+        )
+        ai_adapter = manager.ai_adapter_factory.get_adapter(
+            adapter_name, model_key=model_key
+        )
 
         manager.update_task_status(
             celery_task_id,
@@ -462,64 +395,144 @@ def generate_story_from_seed_task(
             ),
         )
 
-        prompt_template = dedent(
-            """
-            You are the lead chronicler for the {project_name} universe. Using the seed
-            idea below, craft a cohesive Markdown story that honours existing canon.
+        prompt_template = """
+**Full Universe Context:**
+---
+{full_context_string}
+---
+**End of Full Universe Context**
 
-            {context_summary}
+**Instruction:** Based **strictly and solely** on the **Full Universe Context** provided above, continue the story for project '{project_name}'. Use the following seed idea. Ensure the generated story is deeply consistent with **all** aspects of the established lore, characters, locations, events, timeline, and writing style found in the context. Output only the new story content in Markdown format. Do not repeat the context.
 
-            Seed idea:
-            {seed}
+**Seed idea:** {seed}
 
-            Requirements:
-            - Write 3-4 paragraphs with natural flow (no headings unless necessary).
-            - Keep tone consistent with previous chronicles of {project_name}.
-            - Mention at least one established character or location if applicable.
-            - Return Markdown without code fences.
-            """
-        ).strip()
+**Generated Story:**
+""".strip()
+
         prompt = prompt_template.format(
             project_name=project.name,
             seed=seed.strip(),
-            context_summary=context_summary,
+            full_context_string=full_context_string,
         )
 
         generated_body = ""
         if hasattr(ai_adapter, "generate_text") and adapter_name != "heuristic":
-            generated_body = ai_adapter.generate_text(prompt, model_key=model_key).strip()
+            generated_body = ai_adapter.generate_text(
+                prompt,
+                model_key=model_key,
+            ).strip()
 
         story_content = _write_story(seed, project, generated_body=generated_body)
 
         manager.update_task_status(
             celery_task_id,
             TaskStatus.RUNNING,
-            progress=60,
-            log_message="Story drafted. Scheduling processing pipeline.",
+            progress=55,
+            log_message="Story drafted. Validating and archiving...",
             result={"story": story_content},
         )
 
-        process_params = {"story_content": story_content}
-        if pr_id is not None:
-            process_params["pr_id"] = pr_id
+        git_adapter = app_context.create_git_adapter(project)
+        validator = app_context.validator
+        archivist = app_context.create_archivist(git_adapter)
 
-        process_task = manager.create_task(
-            project_id=project.id,
-            task_type="process_story",
-            params=process_params,
+        manager.update_task_status(
+            celery_task_id,
+            TaskStatus.RUNNING,
+            progress=60,
+            log_message="Validating story content...",
+        )
+
+        validation_report = validator.validate(
+            story_content,
+            universe_context=full_context_string,
+        )
+
+        for step in validation_report.steps:
+            manager.update_task_status(
+                celery_task_id,
+                TaskStatus.RUNNING,
+                progress=65,
+                log_message=step.summary(),
+            )
+
+        if not validation_report.passed:
+            messages = " | ".join(validation_report.failed_messages())
+            manager.update_task_status(
+                celery_task_id,
+                TaskStatus.FAILURE,
+                progress=70,
+                log_message=f"Validation failed: {messages}",
+            )
+            return
+
+        manager.update_task_status(
+            celery_task_id,
+            TaskStatus.RUNNING,
+            progress=75,
+            log_message="Validation passed. Archiving story...",
+        )
+
+        archive_result = archivist.archive(
+            story_content,
+            universe_context=full_context_string,
+        )
+        files_to_commit: dict[str, str] = dict(archive_result.files)
+
+        for message in archive_result.log_messages:
+            manager.update_task_status(
+                celery_task_id,
+                TaskStatus.RUNNING,
+                progress=80,
+                log_message=message,
+            )
+
+        if not files_to_commit:
+            manager.update_task_status(
+                celery_task_id,
+                TaskStatus.FAILURE,
+                progress=82,
+                log_message="Archival produced no files to commit.",
+            )
+            return
+
+        manager.update_task_status(
+            celery_task_id,
+            TaskStatus.RUNNING,
+            progress=85,
+            log_message="Prepared files for commit.",
+            result={
+                "files": files_to_commit,
+                "metadata": archive_result.metadata,
+            },
+        )
+
+        commit_summary = archive_result.metadata.get("summary", "New story")
+        commit_message = f"Add lore entry: {commit_summary}"
+
+        manager.update_task_status(
+            celery_task_id,
+            TaskStatus.RUNNING,
+            progress=90,
+            log_message="Committing story to project repository...",
+        )
+
+        git_adapter.update_pr_branch(
+            files=files_to_commit,
+            commit_message=commit_message,
         )
 
         manager.update_task_status(
             celery_task_id,
             TaskStatus.SUCCESS,
             progress=100,
-            log_message=(
-                "Story generation finished. Created processing task "
-                f"#{process_task.id} for validation and archival."
-            ),
+            log_message="Story generated, validated, archived, and pushed successfully.",
         )
     except Exception as exc:  # pragma: no cover - defensive logging
-        logger.exception("generate_story_from_seed_task failed: %s", exc)
+        logger.exception(
+            "generate_and_process_story_from_seed_task failed: %s",
+            exc,
+        )
         manager.update_task_status(
             celery_task_id,
             TaskStatus.FAILURE,
@@ -596,7 +609,7 @@ def generate_saga_task(
                 params["pr_id"] = pr_id
             sub_task = manager.create_task(
                 project_id=project.id,
-                task_type="generate_story",
+                task_type="generate_and_process_story_from_seed",
                 params=params,
             )
             current_status_after_dispatch = _get_current_status(task_db_id)
@@ -640,7 +653,7 @@ def generate_saga_task(
 
 
 __all__ = [
-    "process_story_task",
-    "generate_story_from_seed_task",
+    "uce_process_story_task",
+    "generate_and_process_story_from_seed_task",
     "generate_saga_task",
 ]
