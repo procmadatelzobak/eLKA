@@ -24,6 +24,11 @@ ai:
   models:
     gemini-pro: "gemini-2.5-pro"
     gemini-flash: "gemini-2.5-flash"
+  adapters:
+    gemini:
+      # Configure how many Gemini requests per minute workers may issue before
+      # proactively waiting. Adjust when Google updates free-tier quotas.
+      rate_limit_rpm: 60
   # Optional explicit API key when you prefer storing it in the config file
   # instead of the environment. The environment variable always takes
   # precedence and secrets should never be committed.

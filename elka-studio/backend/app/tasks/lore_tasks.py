@@ -222,7 +222,11 @@ def _accumulate_usage(
     accumulator["output"] += int(usage.get("candidates_token_count", 0) or 0)
 
 
-@celery_app.task(bind=True, name="app.tasks.lore_tasks.uce_process_story_task")
+@celery_app.task(
+    bind=True,
+    base=BaseTask,
+    name="app.tasks.lore_tasks.uce_process_story_task",
+)
 def uce_process_story_task(
     self,
     task_db_id: int,

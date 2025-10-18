@@ -10,6 +10,7 @@ This module exposes two levels of helpers:
 
 from __future__ import annotations
 
+import logging
 import os
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -19,6 +20,9 @@ from typing import Any, Dict, Optional
 import yaml
 
 from app.utils.filesystem import sanitize_filename
+
+
+logger = logging.getLogger(__name__)
 
 def find_config_file() -> Optional[Path]:
     """Return the first configuration file discovered for the application."""
@@ -161,6 +165,36 @@ class Config:
         if not isinstance(models, dict):
             return {}
         return {str(key): str(value) for key, value in models.items()}
+
+    def gemini_rate_limit_rpm(self) -> int:
+        """Return the configured Gemini requests-per-minute limit."""
+
+        env_value = os.getenv("GEMINI_RATE_LIMIT_RPM")
+        if env_value is not None:
+            try:
+                return max(int(env_value), 0)
+            except ValueError:
+                logger.warning(
+                    "Invalid GEMINI_RATE_LIMIT_RPM value '%s'; falling back to default.",
+                    env_value,
+                )
+
+        ai_config = self.data.get("ai", {})
+        adapters = ai_config.get("adapters", {})
+        if isinstance(adapters, dict):
+            gemini_settings = adapters.get("gemini", {})
+            if isinstance(gemini_settings, dict):
+                raw_value = gemini_settings.get("rate_limit_rpm")
+                if raw_value is not None:
+                    try:
+                        return max(int(raw_value), 0)
+                    except (TypeError, ValueError):
+                        logger.warning(
+                            "Invalid gemini.rate_limit_rpm value '%s'; using default.",
+                            raw_value,
+                        )
+
+        return 60
 
     def resolve_model_name(self, model_key: str) -> str:
         """Translate a model key (e.g. ``gemini-pro``) to a provider model name."""

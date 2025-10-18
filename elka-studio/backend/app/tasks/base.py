@@ -6,6 +6,7 @@ import time
 from typing import Any
 
 from celery import Task
+from google.api_core.exceptions import ResourceExhausted
 from celery.utils.log import get_task_logger
 
 from app.celery_app import celery_app
@@ -20,6 +21,11 @@ class BaseTask(Task):
     """Base class providing helpers for concrete Celery tasks."""
 
     abstract = True
+    autoretry_for = (ResourceExhausted,)
+    retry_kwargs = {"max_retries": 5}
+    retry_backoff = True
+    retry_backoff_max = 600
+    retry_jitter = True
 
     def __call__(self, *args: Any, **kwargs: Any) -> Any:  # pragma: no cover - celery runtime
         self.db_task_id: int | None = None
