@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from copy import deepcopy
 from datetime import datetime
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, List, Optional
 
 from sqlalchemy import (
     Boolean,
@@ -17,7 +17,7 @@ from sqlalchemy import (
     Text,
     func,
 )
-from sqlalchemy.orm import Mapped, relationship
+from sqlalchemy.orm import Mapped, mapped_column, relationship
 from sqlalchemy.sql import expression
 
 
@@ -63,7 +63,17 @@ class Task(Base):
         DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now()
     )
 
+    parent_task_id: Mapped[Optional[int]] = mapped_column(
+        ForeignKey("tasks.id"), nullable=True
+    )
+
     project: Mapped["Project"] = relationship("Project", back_populates="tasks")
+    children: Mapped[List["Task"]] = relationship(
+        "Task", back_populates="parent", cascade="all, delete-orphan"
+    )
+    parent: Mapped[Optional["Task"]] = relationship(
+        "Task", back_populates="children", remote_side=[id]
+    )
 
     def to_dict(self) -> dict[str, Any]:
         """Serialize the task for API responses."""

@@ -131,6 +131,16 @@ class ExtractedData(BaseModel):
     others: List[ExtractedEntity] = Field(default_factory=list)
 
 
+class TaskType(str, Enum):
+    """Identifier for background tasks scheduled in eLKA Studio."""
+
+    GENERATE_STORY = "generate_story"
+    GENERATE_SAGA = "generate_saga"
+    GENERATE_CHAPTER = "generate_chapter"
+    PROCESS_STORY = "process_story"
+    UCE_PROCESS_STORY = "uce_process_story"
+
+
 __all__ = [
     "FactEntity",
     "FactEvent",
@@ -143,4 +153,5 @@ __all__ = [
     "ExtractedEntity",
     "ExtractedEvent",
     "ExtractedData",
+    "TaskType",
 ]

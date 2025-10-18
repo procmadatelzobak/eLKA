@@ -9,14 +9,17 @@ import time
 from datetime import datetime, timezone
 from pathlib import Path
 from textwrap import dedent
+from typing import Any, Dict, List, Optional
 
 from celery.exceptions import Retry
+from celery.result import AsyncResult
 from celery.utils.log import get_task_logger
 
 from app.adapters.ai.base import get_ai_adapters
 from app.celery_app import celery_app
 from app.core.context import app_context
 from app.core.archivist import load_universe
+from app.core.schemas import TaskType
 from app.core.extractor import extract_fact_graph
 from app.core.planner import plan_changes
 from app.core.validator import validate_universe
@@ -81,28 +84,80 @@ def _build_story_document(
     return document, relative_path
 
 
-def _plan_saga(theme: str, chapters: int) -> list[dict[str, str]]:
-    chapter_templates = [
-        "Awakening",
-        "Rising Tension",
-        "Crossroads",
-        "Revelation",
-        "Convergence",
-        "Climax",
-        "Aftermath",
-        "Legacy",
+def _extract_json_payload(raw_text: str) -> Dict[str, Any]:
+    """Best-effort extraction of a JSON payload from AI output."""
+
+    cleaned = raw_text.strip()
+    if not cleaned:
+        raise ValueError("Planner response was empty")
+
+    try:
+        return json.loads(cleaned)
+    except json.JSONDecodeError:
+        start = cleaned.find("{")
+        end = cleaned.rfind("}")
+        if start != -1 and end != -1 and end > start:
+            snippet = cleaned[start : end + 1]
+            try:
+                return json.loads(snippet)
+            except json.JSONDecodeError as exc:
+                raise ValueError("Failed to parse JSON planner response") from exc
+        raise ValueError("Planner response did not contain JSON data")
+
+
+def _build_chapter_document(
+    project: Project,
+    *,
+    saga_title: str,
+    chapter_index: int,
+    total_chapters: int,
+    chapter_plan: Optional[Dict[str, Any]],
+    author: str,
+    generated_body: str,
+    story_directory: Path,
+) -> tuple[str, Path, str]:
+    """Create a chapter document with YAML front matter."""
+
+    resolved_saga_title = saga_title.strip() if saga_title else project.name
+    plan_title = (chapter_plan or {}).get("title")
+    resolved_chapter_title = (plan_title or f"Chapter {chapter_index}").strip()
+    combined_title = (
+        f"{resolved_saga_title} - {resolved_chapter_title}".strip(" -")
+        if resolved_saga_title
+        else resolved_chapter_title
+    )
+
+    timestamp_utc = datetime.now(timezone.utc).replace(microsecond=0)
+    generated_at = timestamp_utc.isoformat().replace("+00:00", "Z")
+    sanitized_name = sanitize_filename(
+        f"{chapter_index:02d}-{resolved_chapter_title}",
+        default=f"chapter-{chapter_index:02d}",
+    )
+    relative_path = story_directory / f"{sanitized_name}.md"
+
+    front_matter_lines = [
+        "---",
+        f"title: \"{_escape_front_matter(combined_title)}\"",
+        f"author: \"{_escape_front_matter(author)}\"",
+        f"chapter: {chapter_index}",
+        f"total_chapters: {total_chapters}",
+        f"saga_title: \"{_escape_front_matter(resolved_saga_title)}\"",
+        f"generated_at: {generated_at}",
     ]
-    plan: list[dict[str, str]] = []
-    for index in range(chapters):
-        template = chapter_templates[index % len(chapter_templates)]
-        number = index + 1
-        title = f"{theme.title()} — {template} ({number})"
-        seed = (
-            f"Chapter {number} of the {theme} saga focuses on {template.lower()} moments, "
-            "building on established canon with new conflicts and discoveries."
-        )
-        plan.append({"title": title, "seed": seed})
-    return plan
+
+    if chapter_plan:
+        outline_text = json.dumps(chapter_plan, ensure_ascii=False, indent=2)
+        front_matter_lines.append("outline: |")
+        front_matter_lines.extend([f"  {line}" for line in outline_text.splitlines()])
+
+    front_matter_lines.extend(["---", ""])
+
+    body = generated_body.strip()
+    if not body.endswith("\n"):
+        body = f"{body}\n"
+
+    document = "\n".join(front_matter_lines) + body
+    return document, relative_path, combined_title
 
 
 def _get_current_status(task_db_id: int) -> TaskStatus | None:
@@ -437,6 +492,13 @@ def generate_story_from_seed_task(
         )
 
         full_context_string = _load_full_universe_context(project_path, project_id)
+        word_count = len(full_context_string.split())
+        logger.info("Loaded full context, estimated word count: %s", word_count)
+        if word_count > 500000:
+            logger.warning(
+                "Full context word count (%s) is very large and might exceed model limits or cause slow processing/high costs.",
+                word_count,
+            )
 
         try:
             model_key = manager.config.get_model_key_for_task("seed_generation")
@@ -695,6 +757,7 @@ def process_story_task(
             story_content,
             story_file_path=project_path / relative_story_path,
             universe_context=universe_context,
+            task_id=task_db_id,
         )
         files_to_commit: dict[str, str] = dict(archive_result.files)
 
@@ -744,16 +807,29 @@ def process_story_task(
             log_message="Committing story to project repository...",
         )
 
-        git_adapter.update_pr_branch(
-            files=files_to_commit,
+        branch_name, staged_paths = archivist.commit_to_branch(
+            task_id=task_db_id,
             commit_message=commit_message,
+            expected_files=files_to_commit.keys(),
         )
+
+        result_payload = {
+            "files": files_to_commit,
+            "metadata": archive_result.metadata,
+            "branch": branch_name,
+            "staged_paths": staged_paths,
+            "commit_message": commit_message,
+        }
 
         manager.update_task_status_by_db_id(
             task_db_id,
             TaskStatus.SUCCESS,
             progress=100,
-            log_message="Story processed and archived successfully.",
+            log_message=(
+                "Story processed, archived, and pushed to branch "
+                f"'{branch_name}'."
+            ),
+            result=result_payload,
         )
     except Exception as exc:  # pragma: no cover - defensive logging
         if isinstance(exc, Retry):
@@ -768,6 +844,235 @@ def process_story_task(
     finally:
         self.update_db_task_tokens(tokens["input"], tokens["output"])
 
+@celery_app.task(
+    bind=True,
+    base=BaseTask,
+    name="app.tasks.lore_tasks.generate_chapter_task",
+)
+def generate_chapter_task(
+    self,
+    task_db_id: int,
+    project_id: int,
+    chapter_index: int,
+    total_chapters: int,
+    saga_outline: Dict[str, Any] | str,
+    chapter_plan: Dict[str, Any] | None = None,
+    story_title: str | None = None,
+    story_author: str | None = None,
+    previous_chapter_content: str | None = None,
+    pr_id: int | None = None,
+) -> Dict[str, Any]:
+    """Generate a single saga chapter and archive it in the repository."""
+
+    from app.services.task_manager import TaskManager
+
+    manager = TaskManager()
+    celery_task_id = self.request.id
+    tokens = {"input": 0, "output": 0}
+
+    try:
+        manager.update_task_status(
+            celery_task_id,
+            TaskStatus.RUNNING,
+            progress=5,
+            log_message=(
+                f"Task {task_db_id}: generating chapter {chapter_index}/{total_chapters}."
+            ),
+        )
+
+        project = app_context.git_manager.get_project_from_db(project_id)
+        project_path = Path(app_context.git_manager.resolve_project_path(project))
+
+        manager.update_task_status(
+            celery_task_id,
+            TaskStatus.RUNNING,
+            progress=15,
+            log_message="Loading universe context for chapter generation...",
+        )
+
+        full_context_string = _load_full_universe_context(project_path, project_id)
+
+        try:
+            model_key = manager.config.get_model_key_for_task("generate_chapter")
+            model_name = manager.config.get_model_name_for_task("generate_chapter")
+        except KeyError:
+            model_key = manager.config.get_model_key_for_task("planning")
+            model_name = manager.config.get_model_name_for_task("planning")
+
+        adapter_name = (
+            "heuristic"
+            if model_key == "heuristic"
+            else manager.config.get_default_adapter()
+        )
+        ai_adapter = manager.ai_adapter_factory.get_adapter(
+            adapter_name,
+            model_key=model_key if adapter_name != "heuristic" else None,
+        )
+
+        manager.update_task_status(
+            celery_task_id,
+            TaskStatus.RUNNING,
+            progress=30,
+            log_message=(
+                "Using AI adapter '%s' (model key '%s', model '%s') for chapter "
+                "generation." % (adapter_name, model_key, model_name)
+            ),
+        )
+
+        if isinstance(saga_outline, dict):
+            outline_data = saga_outline
+        else:
+            outline_data = _extract_json_payload(str(saga_outline))
+
+        chapter_plan_data = chapter_plan if isinstance(chapter_plan, dict) else None
+        saga_title = (
+            (story_title or "").strip()
+            or str(outline_data.get("saga_title", ""))
+            or project.name
+        )
+        resolved_author = (story_author or "").strip() or "eLKA Author"
+
+        outline_text = json.dumps(outline_data, ensure_ascii=False, indent=2)
+        chapter_plan_text = (
+            json.dumps(chapter_plan_data, ensure_ascii=False, indent=2)
+            if chapter_plan_data
+            else "No detailed chapter plan provided."
+        )
+
+        prompt_sections: List[str] = [
+            "You are an expert saga author continuing a multi-chapter narrative.",
+            "",
+            "## Universe Context",
+            full_context_string,
+            "",
+            "## Saga Outline",
+            outline_text,
+        ]
+
+        if chapter_plan_data:
+            prompt_sections.extend(
+                [
+                    "",
+                    f"## Chapter {chapter_index} Plan",
+                    chapter_plan_text,
+                ]
+            )
+
+        if previous_chapter_content:
+            prompt_sections.extend(
+                [
+                    "",
+                    "## Previous Chapter Content",
+                    previous_chapter_content.strip(),
+                ]
+            )
+
+        prompt_sections.extend(
+            [
+                "",
+                dedent(
+                    f"""
+                    ## Writing Instructions
+                    - Write only the full prose for Chapter {chapter_index} of {total_chapters}.
+                    - Maintain continuity with earlier chapters and foreshadow future beats only when supported by the outline.
+                    - Use expressive Markdown prose suitable for publication.
+                    - Do not include commentary about other chapters or meta analysis.
+                    - Return only the chapter content in Markdown format.
+                    """
+                ).strip(),
+            ]
+        )
+
+        prompt = "\n".join(prompt_sections)
+
+        manager.update_task_status(
+            celery_task_id,
+            TaskStatus.RUNNING,
+            progress=45,
+            log_message="Requesting chapter content from AI adapter...",
+        )
+
+        generated_text, usage_metadata = ai_adapter.generate_text(
+            prompt,
+            model_key=model_key if adapter_name != "heuristic" else None,
+        )
+        _accumulate_usage(usage_metadata, tokens)
+        generated_body = generated_text.strip()
+
+        story_directory = app_context.config.story_directory
+        document, relative_path, display_title = _build_chapter_document(
+            project,
+            saga_title=saga_title,
+            chapter_index=chapter_index,
+            total_chapters=total_chapters,
+            chapter_plan=chapter_plan_data,
+            author=resolved_author,
+            generated_body=generated_body,
+            story_directory=story_directory,
+        )
+
+        git_adapter = app_context.create_git_adapter(project)
+        archivist = app_context.create_archivist(git_adapter)
+
+        manager.update_task_status(
+            celery_task_id,
+            TaskStatus.RUNNING,
+            progress=65,
+            log_message="Archiving generated chapter and updating lore metadata...",
+        )
+
+        archive_result = archivist.archive(
+            document,
+            story_file_path=project_path / relative_path,
+            universe_context=full_context_string,
+            task_id=task_db_id,
+        )
+
+        files_to_commit = dict(archive_result.files)
+        commit_message = f"Add saga chapter {chapter_index}: {display_title}"
+
+        branch_name, staged_paths = archivist.commit_to_branch(
+            task_id=task_db_id,
+            commit_message=commit_message,
+            expected_files=files_to_commit.keys(),
+        )
+
+        result_payload: Dict[str, Any] = {
+            "content": document,
+            "title": display_title,
+            "chapter_index": chapter_index,
+            "total_chapters": total_chapters,
+            "files": files_to_commit,
+            "metadata": archive_result.metadata,
+            "branch": branch_name,
+            "staged_paths": staged_paths,
+        }
+
+        manager.update_task_status(
+            celery_task_id,
+            TaskStatus.SUCCESS,
+            progress=100,
+            log_message=(
+                f"Chapter {chapter_index}/{total_chapters} archived and pushed to branch '{branch_name}'."
+            ),
+            result=result_payload,
+        )
+
+        return result_payload
+    except Exception as exc:  # pragma: no cover - defensive logging
+        if isinstance(exc, Retry):
+            raise
+        logger.exception("generate_chapter_task failed: %s", exc)
+        manager.update_task_status(
+            celery_task_id,
+            TaskStatus.FAILURE,
+            log_message=f"Task {task_db_id} failed: {exc}",
+        )
+        raise
+    finally:
+        self.update_db_task_tokens(tokens["input"], tokens["output"])
+
+
 @celery_app.task(bind=True, name="app.tasks.lore_tasks.generate_saga_task")
 def generate_saga_task(
     self,
@@ -779,7 +1084,7 @@ def generate_saga_task(
     story_title: str | None = None,
     story_author: str | None = None,
 ) -> None:
-    """Plan a saga and dispatch story generation subtasks."""
+    """Plan a saga and sequentially generate each chapter."""
 
     if chapters < 1:
         raise ValueError("Saga must contain at least one chapter.")
@@ -788,104 +1093,212 @@ def generate_saga_task(
 
     manager = TaskManager()
     celery_task_id = self.request.id
+    tokens = {"input": 0, "output": 0}
 
     manager.update_task_status(
         celery_task_id,
         TaskStatus.RUNNING,
         progress=5,
-        log_message=f"Task {task_db_id}: planning a {chapters}-part saga for theme '{theme}'.",
+        log_message=(
+            f"Task {task_db_id}: planning a {chapters}-part saga for theme '{theme}'."
+        ),
     )
 
     try:
         project = app_context.git_manager.get_project_from_db(project_id)
-        resolved_author = (story_author or "").strip() or "eLKA Author"
-        base_title = (story_title or "").strip()
+        project_path = Path(app_context.git_manager.resolve_project_path(project))
 
         manager.update_task_status(
             celery_task_id,
             TaskStatus.RUNNING,
-            progress=20,
-            log_message=f"Creating saga outline for '{project.name}'.",
+            progress=15,
+            log_message="Gathering universe context for saga planning...",
         )
 
-        plan = _plan_saga(theme, chapters)
-        plan_payload = json.dumps({"chapters": plan}, ensure_ascii=False)
-        logger.debug("Saga plan for task %s: %s", task_db_id, plan_payload)
+        full_context_string = _load_full_universe_context(project_path, project_id)
+
+        model_key = manager.config.get_model_key_for_task("planning")
+        model_name = manager.config.get_model_name_for_task("planning")
+        adapter_name = (
+            "heuristic"
+            if model_key == "heuristic"
+            else manager.config.get_default_adapter()
+        )
+        ai_adapter = manager.ai_adapter_factory.get_adapter(
+            adapter_name,
+            model_key=model_key if adapter_name != "heuristic" else None,
+        )
 
         manager.update_task_status(
             celery_task_id,
             TaskStatus.RUNNING,
-            progress=40,
-            log_message="Saga outline prepared. Dispatching chapter tasks.",
+            progress=25,
+            log_message=(
+                "Generating saga outline with adapter '%s' (model key '%s', model '%s')."
+                % (adapter_name, model_key, model_name)
+            ),
         )
 
-        for index, chapter in enumerate(plan, start=1):
+        planning_prompt = dedent(
+            f"""
+            You are designing an epic saga set within the established universe context.
+
+            ## Universe Context
+            {full_context_string}
+
+            Craft a cohesive saga inspired by the theme "{theme}" that spans exactly {chapters} chapters.
+            Respond strictly in JSON with the following structure:
+            {{
+              "saga_title": "...",
+              "logline": "...",
+              "chapters": [
+                {{
+                  "index": 1,
+                  "title": "...",
+                  "summary": "...",
+                  "key_events": ["...", "..."]
+                }}
+              ]
+            }}
+
+            Each chapter summary must reference previous developments to maintain continuity.
+            """
+        ).strip()
+
+        planner_response, usage_metadata = ai_adapter.generate_text(
+            planning_prompt,
+            model_key=model_key if adapter_name != "heuristic" else None,
+        )
+        _accumulate_usage(usage_metadata, tokens)
+
+        outline_data = _extract_json_payload(planner_response)
+        chapters_data = outline_data.get("chapters")
+        if not isinstance(chapters_data, list) or not chapters_data:
+            raise ValueError("Planner response did not include any chapters")
+
+        total_chapters = len(chapters_data)
+        if total_chapters != chapters:
+            logger.warning(
+                "Planner produced %s chapters but %s were requested; proceeding with planner output.",
+                total_chapters,
+                chapters,
+            )
+
+        manager.update_task_status(
+            celery_task_id,
+            TaskStatus.RUNNING,
+            progress=45,
+            log_message=f"Saga outline prepared with {total_chapters} chapter(s).",
+            result={
+                "saga_outline": outline_data,
+                "planner_raw": planner_response,
+            },
+        )
+
+        saga_title_resolved = (
+            (story_title or "").strip()
+            or str(outline_data.get("saga_title", ""))
+            or project.name
+        )
+        saga_author_resolved = (story_author or "").strip() or "eLKA Author"
+
+        previous_content: Optional[str] = None
+        chapter_results: List[Dict[str, Any]] = []
+
+        for index, chapter_plan in enumerate(chapters_data, start=1):
             _wait_while_paused(task_db_id)
-            current_status = _get_current_status(task_db_id)
-            if current_status == TaskStatus.PAUSED:
-                logger.info(
-                    "Saga task %s paused. Halting chapter dispatch.",
-                    task_db_id,
-                )
+            if _get_current_status(task_db_id) == TaskStatus.PAUSED:
+                logger.info("Saga task %s paused before chapter %s.", task_db_id, index)
                 break
 
             manager.update_task_status(
                 celery_task_id,
                 TaskStatus.RUNNING,
-                progress=40 + int(50 * index / max(chapters, 1)),
-                log_message=(
-                    f"Dispatching chapter {index}/{chapters}: {chapter['title']}."
-                ),
+                progress=45 + int(40 * index / max(total_chapters, 1)),
+                log_message=f"Starting generation for chapter {index}/{total_chapters}.",
             )
-            chapter_title = chapter["title"].strip()
-            full_chapter_title = (
-                f"{base_title} — {chapter_title}"
-                if base_title
-                else chapter_title
-            )
+
             params = {
-                "seed": chapter["seed"],
-                "story_title": full_chapter_title,
-                "story_author": resolved_author,
+                "project_id": project.id,
+                "chapter_index": index,
+                "total_chapters": total_chapters,
+                "saga_outline": outline_data,
+                "chapter_plan": chapter_plan,
+                "story_title": saga_title_resolved,
+                "story_author": saga_author_resolved,
+                "previous_chapter_content": previous_content,
             }
             if pr_id is not None:
                 params["pr_id"] = pr_id
-            sub_task = manager.create_task(
+
+            chapter_task = manager.create_task(
                 project_id=project.id,
-                task_type="generate_story",
+                task_type=TaskType.GENERATE_CHAPTER.value,
                 params=params,
+                parent_task_id=task_db_id,
             )
-            current_status_after_dispatch = _get_current_status(task_db_id)
-            if current_status_after_dispatch == TaskStatus.PAUSED:
-                logger.info(
-                    "Saga task %s paused after dispatching chapter %s. Skipping status update.",
+
+            try:
+                async_result = AsyncResult(chapter_task.celery_task_id)
+                chapter_payload = async_result.get(disable_sync_subtasks=False)
+            except Exception as exc:
+                logger.exception(
+                    "Chapter %s generation failed for saga task %s: %s",
+                    index,
                     task_db_id,
-                    chapter["title"],
+                    exc,
                 )
-                break
+                manager.update_task_status(
+                    celery_task_id,
+                    TaskStatus.FAILURE,
+                    log_message=(
+                        f"Chapter {index} generation failed: {exc}. See child task {chapter_task.id}."
+                    ),
+                    result={
+                        "saga_outline": outline_data,
+                        "failed_chapter": index,
+                        "chapters": chapter_results,
+                    },
+                )
+                raise
+
+            previous_content = chapter_payload.get("content")
+            chapter_results.append(
+                {
+                    "task_id": chapter_task.id,
+                    "chapter_index": index,
+                    "title": chapter_payload.get("title")
+                    or str(chapter_plan.get("title", f"Chapter {index}")),
+                    "branch": chapter_payload.get("branch"),
+                }
+            )
 
             manager.update_task_status(
                 celery_task_id,
                 TaskStatus.RUNNING,
                 log_message=(
-                    f"Chapter task #{sub_task.id} created for '{chapter['title']}'."
+                    f"Chapter {index}/{total_chapters} completed via task {chapter_task.id}."
                 ),
+                result={"chapters": chapter_results},
             )
 
-        final_status = _get_current_status(task_db_id)
-        if final_status == TaskStatus.PAUSED:
-            logger.info(
-                "Saga task %s remains paused; completion status will be set later.",
-                task_db_id,
-            )
-        else:
-            manager.update_task_status(
-                celery_task_id,
-                TaskStatus.SUCCESS,
-                progress=100,
-                log_message="Saga generation tasks dispatched successfully.",
-            )
+        if _get_current_status(task_db_id) == TaskStatus.PAUSED:
+            logger.info("Saga task %s paused after chapter loop.", task_db_id)
+            return
+
+        manager.update_task_status(
+            celery_task_id,
+            TaskStatus.SUCCESS,
+            progress=100,
+            log_message="Saga generation completed successfully.",
+            result={
+                "saga_outline": outline_data,
+                "chapters": chapter_results,
+            },
+        )
     except Exception as exc:  # pragma: no cover - defensive logging
+        if isinstance(exc, Retry):
+            raise
         logger.exception("generate_saga_task failed: %s", exc)
         manager.update_task_status(
             celery_task_id,
@@ -893,11 +1306,14 @@ def generate_saga_task(
             log_message=f"Task {task_db_id} failed: {exc}",
         )
         raise
+    finally:
+        self.update_db_task_tokens(tokens["input"], tokens["output"])
 
 
 __all__ = [
     "uce_process_story_task",
     "generate_story_from_seed_task",
     "process_story_task",
+    "generate_chapter_task",
     "generate_saga_task",
 ]

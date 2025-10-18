@@ -47,4 +47,11 @@ export const deleteTask = async (taskId) => {
   }
 };
 
+export const fetchAiSettings = async () => {
+  const response = await getApiClient().get('/settings/ai');
+  return response.data;
+};
+
+export const updateAiSettings = (settings) => getApiClient().post('/settings/ai', settings);
+
 export default getApiClient;
