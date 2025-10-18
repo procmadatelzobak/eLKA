@@ -7,6 +7,7 @@ import time
 from dataclasses import dataclass
 from typing import Any, Dict
 
+from celery.exceptions import MaxRetriesExceededError, Retry
 from google import genai
 from google.api_core.exceptions import ResourceExhausted
 from google.genai.errors import ClientError
@@ -19,12 +20,6 @@ from app.utils.config import Config
 
 
 logger = logging.getLogger(__name__)
-
-
-class GeminiRateLimitError(RuntimeError):
-    """Pickle-friendly wrapper for Celery retries triggered by Gemini quotas."""
-
-
 @dataclass(slots=True)
 class GeminiAdapter(BaseAIAdapter):
     """Parametric adapter for Google Gemini models."""
@@ -54,6 +49,8 @@ class GeminiAdapter(BaseAIAdapter):
             try:
                 storage = RedisStorage(redis_url)
             except Exception as exc:  # pragma: no cover - depends on Redis availability
+                if isinstance(exc, Retry):
+                    raise
                 logger.warning(
                     "Falling back to in-memory rate limiter for Gemini usage tracking: %s",
                     exc,
@@ -85,6 +82,8 @@ class GeminiAdapter(BaseAIAdapter):
                     self._rate_limit_item, self._rate_limit_namespace
                 )
             except Exception as exc:  # pragma: no cover - depends on Redis availability
+                if isinstance(exc, Retry):
+                    raise
                 if not self._rate_limiter_disabled:
                     logger.warning(
                         "Disabling proactive Gemini rate limiter due to storage error: %s",
@@ -157,6 +156,7 @@ class GeminiAdapter(BaseAIAdapter):
             )
         except (ResourceExhausted, ClientError) as exc:
             self._handle_rate_limit(exc, operation="text generation")
+            return "", None
         metadata = self._extract_usage_metadata(response)
         return getattr(response, "text", ""), metadata
 
@@ -189,6 +189,7 @@ class GeminiAdapter(BaseAIAdapter):
             )
         except (ResourceExhausted, ClientError) as exc:
             self._handle_rate_limit(exc, operation="analysis")
+            return str(exc)
         return getattr(response, "text", str(response))
 
     def summarise(self, story_content: str) -> str:  # type: ignore[override]
@@ -218,6 +219,7 @@ class GeminiAdapter(BaseAIAdapter):
             text, metadata = self.generate_text(prompt, model_key=model_key)
         except (ResourceExhausted, ClientError) as exc:
             self._handle_rate_limit(exc, operation="JSON generation")
+            return "{}", None
         try:
             json.loads(text)
         except json.JSONDecodeError as exc:
@@ -225,6 +227,8 @@ class GeminiAdapter(BaseAIAdapter):
             logger.error(error_message)
             raise ValueError(error_message) from exc
         except Exception as exc:  # pragma: no cover - defensive logging
+            if isinstance(exc, Retry):
+                raise
             logger.error("Error processing Gemini JSON response: %s", exc)
             raise
         return text, metadata
@@ -343,6 +347,8 @@ class GeminiAdapter(BaseAIAdapter):
             )
             return int(getattr(response, "total_tokens", 0))
         except Exception as exc:  # pragma: no cover - depends on external service
+            if isinstance(exc, Retry):
+                raise
             logger.error("Failed to count tokens: %s", exc)
             return 0
 
@@ -367,28 +373,31 @@ class GeminiAdapter(BaseAIAdapter):
             delay_seconds,
         )
 
-        from celery import current_task, exceptions
+        from celery import current_task
 
         if current_task:
             try:
-                raise current_task.retry(
-                    exc=GeminiRateLimitError(str(exc)),
+                current_task.retry(
+                    exc=exc,
                     countdown=delay_seconds,
                     max_retries=5,
                 )
-            except exceptions.MaxRetriesExceededError:
+            except Retry:
+                raise
+            except MaxRetriesExceededError:
                 logger.error("Max retries exceeded for rate limit. Task will fail.")
                 raise exc
             except Exception as retry_exc:  # pragma: no cover - defensive logging
+                if isinstance(retry_exc, Retry):
+                    raise retry_exc
                 logger.error("Error during Celery retry attempt: %s", retry_exc)
                 raise exc
+            return None
         else:
             logger.warning(
                 "Not running within a Celery task context, re-raising ResourceExhausted."
             )
             raise exc
-
-        raise exc
 
 
 __all__ = ["GeminiAdapter"]

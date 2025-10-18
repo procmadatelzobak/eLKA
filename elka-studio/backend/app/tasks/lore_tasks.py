@@ -10,6 +10,7 @@ from datetime import datetime
 from pathlib import Path
 from textwrap import dedent
 
+from celery.exceptions import Retry
 from celery.utils.log import get_task_logger
 
 from app.adapters.ai.base import get_ai_adapters
@@ -160,6 +161,8 @@ def _load_full_universe_context(project_path: Path, project_id: int) -> str:
                             filepath.read_text(encoding="utf-8") + "\n"
                         )
                     except Exception as exc:  # pragma: no cover - filesystem interaction
+                        if isinstance(exc, Retry):
+                            raise
                         logger.warning("Could not read file %s: %s", filepath, exc)
                     full_context_string += (
                         f"--- END FILE: {relative_path} ---\n\n"
@@ -175,6 +178,8 @@ def _load_full_universe_context(project_path: Path, project_id: int) -> str:
             try:
                 full_context_string += file_path.read_text(encoding="utf-8") + "\n"
             except Exception as exc:  # pragma: no cover - filesystem interaction
+                if isinstance(exc, Retry):
+                    raise
                 logger.warning("Could not read file %s: %s", file_path, exc)
             full_context_string += f"--- END FILE: {file_name} ---\n\n"
 
@@ -189,6 +194,8 @@ def _load_full_universe_context(project_path: Path, project_id: int) -> str:
                 word_count,
             )
     except Exception as exc:  # pragma: no cover - filesystem interaction
+        if isinstance(exc, Retry):
+            raise
         logger.error(
             "Failed to load full universe context for project %s: %s",
             project_id,
@@ -354,6 +361,8 @@ def uce_process_story_task(
             },
         )
     except Exception as exc:  # pragma: no cover - defensive logging
+        if isinstance(exc, Retry):
+            raise
         logger.exception("uce_process_story_task failed: %s", exc)
         manager.update_task_status(
             celery_task_id,
@@ -497,6 +506,8 @@ Ensure the generated story is deeply consistent with **all** aspects of the esta
             "pr_id": pr_id,
         }
     except Exception as exc:  # pragma: no cover - defensive logging
+        if isinstance(exc, Retry):
+            raise
         logger.exception("generate_story_from_seed_task failed: %s", exc)
         manager.update_task_status(
             celery_task_id,
@@ -669,6 +680,8 @@ def process_story_task(
             log_message="Story processed and archived successfully.",
         )
     except Exception as exc:  # pragma: no cover - defensive logging
+        if isinstance(exc, Retry):
+            raise
         logger.exception("process_story_task failed: %s", exc)
         manager.update_task_status_by_db_id(
             task_db_id,
