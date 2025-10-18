@@ -9,9 +9,11 @@ eLKA Studio is a full-stack application for building and managing fictional univ
 - **Story & saga generation** – Launch AI-assisted generation pipelines for single stories or multi-chapter sagas.
 - **Automated lore processing** – Validate, archive, and version generated content with Git integration.
 - **Full-context story pipeline** – A single task loads the entire universe, generates consistent lore, archives entities, and updates the timeline automatically.
+- **Manual story processing** – Submit existing stories for validation, extraction, and archival directly from the dashboard.
 - **Objekty entity archival** – Persist extracted characters, locations, and events into `.txt` files mirroring the `Objekty/` structure used by AI Universe projects.
 - **Universe Consistency Engine** – Extract facts, verify canon conflicts, and propose Git-ready updates.
 - **Extensible architecture** – Modular backend services and a modern React frontend designed for customization.
+- **Token transparency** – Track estimated universe context size and per-task token consumption to manage Gemini quotas.
 
 ## Quick Start
 1. Clone the repository: `git clone <repo-url> && cd elka-studio`
@@ -111,7 +113,8 @@ eLKA Studio is a full-stack application for building and managing fictional univ
 - When creating projects programmatically, send `name`, `git_url`, and (optionally) `git_token` in the request body to `/api/projects`. The API normalizes the GitHub shorthand `owner/repo` into a full URL and returns human-readable errors for invalid inputs.
 - The backend root endpoint (`/api/`) returns a short status payload confirming the API is reachable and linking to the interactive documentation at `/docs`.
 - Existing clients should be updated to use the new field names to avoid validation errors.
-- Story generation requests must provide `params.seed` when calling `POST /api/tasks/` with the task type `generate_and_process_story_from_seed`. The dashboard form handles the payload, and custom integrations should mirror the same structure to avoid validation errors.
+- Story generation requests must provide `params.seed` when calling `POST /api/tasks/` with the task type `generate_story`. The backend automatically chains the follow-up processing task, and the dashboard form handles the payload. Custom integrations should mirror the same structure to avoid validation errors.
+- Existing stories can be submitted through `POST /api/tasks/` with `type="process_story"` and `params.story_content`. The worker reuses the same validation and archival pipeline used for generated narratives.
 - The Universe Consistency Engine is available through `POST /api/tasks/story/process` with `project_id`, `story_text`, and an optional `apply` flag. Dry-run responses report the planned diff; the apply mode stores the changes on the temporary branch `task/process-story-<TASK_ID>`, which merges into the default branch once approved.
 - Approve task results with `POST /api/tasks/{task_id}/approve`. The endpoint sets `result_approved = true`, merges into the main branch (for example `main`), and records the resulting SHA in `result.merge_commit`.
 - When a project stores an encrypted Git token, Celery tasks decrypt it and use a credential helper during `git push`, preventing repeated interactive GitHub login prompts during story processing or saga generation.

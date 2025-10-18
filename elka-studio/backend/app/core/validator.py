@@ -285,7 +285,9 @@ def _validate_legend_breaches(
     }
 
     try:
-        response = ai.generate_json(system_prompt, json.dumps(payload, ensure_ascii=False))  # type: ignore[arg-type]
+        response, _ = ai.generate_json(
+            system_prompt, json.dumps(payload, ensure_ascii=False)
+        )  # type: ignore[arg-type]
         findings = json.loads(response) if isinstance(response, str) else response
     except Exception as exc:  # pragma: no cover - adapter specific
         return [

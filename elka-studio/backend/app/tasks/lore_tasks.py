@@ -22,7 +22,7 @@ from app.core.validator import validate_universe
 from app.db.session import SessionLocal
 from app.models.project import Project
 from app.models.task import Task, TaskStatus
-from app.services.task_manager import TaskManager
+from app.tasks.base import BaseTask
 
 logger = get_task_logger(__name__)
 
@@ -123,6 +123,105 @@ def _wait_while_paused(task_db_id: int, interval_seconds: int = 30) -> None:
         time.sleep(interval_seconds)
 
 
+def _load_full_universe_context(project_path: Path, project_id: int) -> str:
+    include_dirs = ["Objekty", "Legendy", "Pokyny", "Příběhy"]
+    include_files = ["timeline.txt", "timeline.md", "README.txt", "README.md"]
+
+    env_dirs = os.getenv("ELKA_UNIVERSE_CONTEXT_DIRS")
+    if env_dirs:
+        include_dirs = [
+            entry.strip()
+            for entry in env_dirs.split(os.pathsep)
+            if entry.strip()
+        ] or include_dirs
+
+    env_files = os.getenv("ELKA_UNIVERSE_CONTEXT_FILES")
+    if env_files:
+        include_files = [
+            entry.strip()
+            for entry in env_files.split(os.pathsep)
+            if entry.strip()
+        ] or include_files
+
+    full_context_string = ""
+    try:
+        for item_name in include_dirs:
+            item_path = project_path / item_name
+            if not item_path.is_dir():
+                continue
+            for pattern in ("*.txt", "*.md"):
+                for filepath in item_path.rglob(pattern):
+                    if not filepath.is_file():
+                        continue
+                    relative_path = filepath.relative_to(project_path)
+                    full_context_string += f"--- START FILE: {relative_path} ---\n"
+                    try:
+                        full_context_string += (
+                            filepath.read_text(encoding="utf-8") + "\n"
+                        )
+                    except Exception as exc:  # pragma: no cover - filesystem interaction
+                        logger.warning("Could not read file %s: %s", filepath, exc)
+                    full_context_string += (
+                        f"--- END FILE: {relative_path} ---\n\n"
+                    )
+
+        for file_name in include_files:
+            if not file_name:
+                continue
+            file_path = project_path / file_name
+            if not file_path.is_file():
+                continue
+            full_context_string += f"--- START FILE: {file_name} ---\n"
+            try:
+                full_context_string += file_path.read_text(encoding="utf-8") + "\n"
+            except Exception as exc:  # pragma: no cover - filesystem interaction
+                logger.warning("Could not read file %s: %s", file_path, exc)
+            full_context_string += f"--- END FILE: {file_name} ---\n\n"
+
+        if not full_context_string:
+            full_context_string = "No universe context files found or loaded."
+            logger.warning("Universe context is empty for project %s.", project_id)
+        else:
+            word_count = len(full_context_string.split())
+            logger.info(
+                "Loaded full context for project %s (approx. %s words).",
+                project_id,
+                word_count,
+            )
+    except Exception as exc:  # pragma: no cover - filesystem interaction
+        logger.error(
+            "Failed to load full universe context for project %s: %s",
+            project_id,
+            exc,
+        )
+        full_context_string = f"Error loading universe context: {exc}"
+
+    return full_context_string
+
+
+def _persist_context_token_count(project_id: int, token_count: int) -> None:
+    if token_count < 0:
+        token_count = 0
+
+    with SessionLocal() as session:
+        project = session.get(Project, project_id)
+        if project is None:
+            return
+        project.estimated_context_tokens = token_count
+        session.add(project)
+        session.commit()
+
+
+def _accumulate_usage(
+    usage: dict | None,
+    accumulator: dict[str, int],
+) -> None:
+    if not usage:
+        return
+    accumulator["input"] += int(usage.get("prompt_token_count", 0) or 0)
+    accumulator["output"] += int(usage.get("candidates_token_count", 0) or 0)
+
+
 @celery_app.task(bind=True, name="app.tasks.lore_tasks.uce_process_story_task")
 def uce_process_story_task(
     self,
@@ -132,6 +231,8 @@ def uce_process_story_task(
     apply: bool = False,
 ) -> None:
     """Execute the Universe Consistency Engine pipeline."""
+
+    from app.services.task_manager import TaskManager
 
     manager = TaskManager()
     celery_task_id = self.request.id
@@ -258,27 +359,34 @@ def uce_process_story_task(
         raise
 
 
-@celery_app.task(bind=True, name="app.tasks.lore_tasks.generate_and_process_story_from_seed_task")
-def generate_and_process_story_from_seed_task(
+@celery_app.task(
+    bind=True,
+    base=BaseTask,
+    name="app.tasks.lore_tasks.generate_story_from_seed",
+)
+def generate_story_from_seed_task(
     self,
     task_db_id: int,
     project_id: int,
     seed: str,
     pr_id: int | None = None,
-) -> None:
-    """Generate, validate, and archive a story from a seed idea."""
+) -> dict:
+    """Generate a story from a seed and return the content for further processing."""
+
+    from app.services.task_manager import TaskManager
 
     manager = TaskManager()
     celery_task_id = self.request.id
-
-    manager.update_task_status(
-        celery_task_id,
-        TaskStatus.RUNNING,
-        progress=5,
-        log_message=f"Task {task_db_id}: starting story generation from seed.",
-    )
+    tokens = {"input": 0, "output": 0}
 
     try:
+        manager.update_task_status(
+            celery_task_id,
+            TaskStatus.RUNNING,
+            progress=5,
+            log_message=f"Task {task_db_id}: starting story generation from seed.",
+        )
+
         project = app_context.git_manager.get_project_from_db(project_id)
         project_path = Path(app_context.git_manager.resolve_project_path(project))
 
@@ -291,88 +399,7 @@ def generate_and_process_story_from_seed_task(
             ),
         )
 
-        include_dirs = ["Objekty", "Legendy", "Pokyny", "Příběhy"]
-        include_files = ["timeline.txt", "timeline.md", "README.txt", "README.md"]
-
-        env_dirs = os.getenv("ELKA_UNIVERSE_CONTEXT_DIRS")
-        if env_dirs:
-            include_dirs = [
-                entry.strip()
-                for entry in env_dirs.split(os.pathsep)
-                if entry.strip()
-            ] or include_dirs
-
-        env_files = os.getenv("ELKA_UNIVERSE_CONTEXT_FILES")
-        if env_files:
-            include_files = [
-                entry.strip()
-                for entry in env_files.split(os.pathsep)
-                if entry.strip()
-            ] or include_files
-
-        full_context_string = ""
-        try:
-            for item_name in include_dirs:
-                item_path = project_path / item_name
-                if not item_path.is_dir():
-                    continue
-                for pattern in ("*.txt", "*.md"):
-                    for filepath in item_path.rglob(pattern):
-                        if not filepath.is_file():
-                            continue
-                        relative_path = filepath.relative_to(project_path)
-                        full_context_string += (
-                            f"--- START FILE: {relative_path} ---\n"
-                        )
-                        try:
-                            full_context_string += (
-                                filepath.read_text(encoding="utf-8") + "\n"
-                            )
-                        except Exception as exc:  # pragma: no cover - filesystem interaction
-                            logger.warning(
-                                "Could not read file %s: %s", filepath, exc
-                            )
-                        full_context_string += (
-                            f"--- END FILE: {relative_path} ---\n\n"
-                        )
-
-            for file_name in include_files:
-                if not file_name:
-                    continue
-                file_path = project_path / file_name
-                if not file_path.is_file():
-                    continue
-                full_context_string += f"--- START FILE: {file_name} ---\n"
-                try:
-                    full_context_string += file_path.read_text(encoding="utf-8") + "\n"
-                except Exception as exc:  # pragma: no cover - filesystem interaction
-                    logger.warning("Could not read file %s: %s", file_path, exc)
-                full_context_string += f"--- END FILE: {file_name} ---\n\n"
-
-            if not full_context_string:
-                full_context_string = "No universe context files found or loaded."
-                logger.warning("Universe context is empty for project %s.", project_id)
-            else:
-                word_count = len(full_context_string.split())
-                logger.info(
-                    "Loaded full context for project %s (approx. %s words).",
-                    project_id,
-                    word_count,
-                )
-        except Exception as exc:  # pragma: no cover - filesystem interaction
-            logger.error(
-                "Failed to load full universe context for project %s: %s",
-                project_id,
-                exc,
-            )
-            full_context_string = f"Error loading universe context: {exc}"
-
-        manager.update_task_status(
-            celery_task_id,
-            TaskStatus.RUNNING,
-            progress=30,
-            log_message="Full universe context loaded. Preparing AI adapter...",
-        )
+        full_context_string = _load_full_universe_context(project_path, project_id)
 
         model_key = manager.config.get_model_key_for_task("generation")
         model_name = manager.config.get_model_name_for_task("generation")
@@ -385,13 +412,15 @@ def generate_and_process_story_from_seed_task(
             adapter_name, model_key=model_key
         )
 
+        context_tokens = ai_adapter.count_tokens(full_context_string)
+        _persist_context_token_count(project_id, context_tokens)
+
         manager.update_task_status(
             celery_task_id,
             TaskStatus.RUNNING,
-            progress=40,
+            progress=35,
             log_message=(
-                f"Using AI adapter '{adapter_name}' with model key '{model_key}' "
-                f"(model: {model_name})."
+                f"Using AI adapter '{adapter_name}' (model key '{model_key}', model '{model_name}')."
             ),
         )
 
@@ -416,11 +445,12 @@ def generate_and_process_story_from_seed_task(
         )
 
         generated_body = ""
-        if hasattr(ai_adapter, "generate_text") and adapter_name != "heuristic":
-            generated_body = ai_adapter.generate_text(
-                prompt,
-                model_key=model_key,
-            ).strip()
+        text, usage_metadata = ai_adapter.generate_text(
+            prompt,
+            model_key=model_key if adapter_name != "heuristic" else None,
+        )
+        generated_body = text.strip()
+        _accumulate_usage(usage_metadata, tokens)
 
         story_content = _write_story(seed, project, generated_body=generated_body)
 
@@ -428,29 +458,109 @@ def generate_and_process_story_from_seed_task(
             celery_task_id,
             TaskStatus.RUNNING,
             progress=55,
-            log_message="Story drafted. Validating and archiving...",
+            log_message="Story drafted. Ready for processing pipeline...",
             result={"story": story_content},
         )
 
-        git_adapter = app_context.create_git_adapter(project)
-        validator = app_context.validator
-        archivist = app_context.create_archivist(git_adapter)
-
+        return {
+            "task_db_id": task_db_id,
+            "project_id": project_id,
+            "story_content": story_content,
+            "universe_context": full_context_string,
+            "pr_id": pr_id,
+        }
+    except Exception as exc:  # pragma: no cover - defensive logging
+        logger.exception("generate_story_from_seed_task failed: %s", exc)
         manager.update_task_status(
             celery_task_id,
+            TaskStatus.FAILURE,
+            log_message=f"Task {task_db_id} failed: {exc}",
+        )
+        raise
+    finally:
+        self.update_db_task_tokens(tokens["input"], tokens["output"])
+
+
+@celery_app.task(
+    bind=True,
+    base=BaseTask,
+    name="app.tasks.lore_tasks.process_story",
+)
+def process_story_task(
+    self,
+    payload: dict | int,
+    project_id: int | None = None,
+    story_content: str | None = None,
+    pr_id: int | None = None,
+) -> None:
+    """Validate, archive, and commit a story to the project's repository."""
+
+    from app.services.task_manager import TaskManager
+
+    manager = TaskManager()
+    celery_task_id = self.request.id
+    tokens = {"input": 0, "output": 0}
+
+    if isinstance(payload, dict):
+        task_db_id = int(payload.get("task_db_id") or 0)
+        story_content = story_content or payload.get("story_content")
+        project_id = project_id or payload.get("project_id")
+        pr_id = pr_id or payload.get("pr_id")
+        universe_context = payload.get("universe_context")
+    else:
+        task_db_id = int(payload)
+        universe_context = None
+
+    if not story_content:
+        raise ValueError("Story content is required for processing.")
+    if project_id is None:
+        raise ValueError("Project identifier is required for processing.")
+    if not task_db_id:
+        raise ValueError("Task database identifier is required for processing.")
+
+    try:
+        project_id_int = int(project_id)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("Project identifier is required for processing.") from exc
+
+    project_id = project_id_int
+
+    try:
+        project = app_context.git_manager.get_project_from_db(project_id)
+        project_path = Path(app_context.git_manager.resolve_project_path(project))
+
+        if not universe_context:
+            universe_context = _load_full_universe_context(project_path, project_id_int)
+            ai_for_context = manager.ai_adapter_factory.get_adapter(
+                manager.config.get_default_adapter(),
+                model_key=manager.config.get_model_key_for_task("generation"),
+            )
+            context_tokens = ai_for_context.count_tokens(universe_context)
+            _persist_context_token_count(project_id_int, context_tokens)
+
+        manager.update_task_status_by_db_id(
+            task_db_id,
+            TaskStatus.RUNNING,
+            progress=55,
+            log_message="Story processing pipeline started.",
+        )
+
+        manager.update_task_status_by_db_id(
+            task_db_id,
             TaskStatus.RUNNING,
             progress=60,
             log_message="Validating story content...",
         )
 
+        validator = app_context.validator
         validation_report = validator.validate(
             story_content,
-            universe_context=full_context_string,
+            universe_context=universe_context,
         )
 
         for step in validation_report.steps:
-            manager.update_task_status(
-                celery_task_id,
+            manager.update_task_status_by_db_id(
+                task_db_id,
                 TaskStatus.RUNNING,
                 progress=65,
                 log_message=step.summary(),
@@ -458,16 +568,19 @@ def generate_and_process_story_from_seed_task(
 
         if not validation_report.passed:
             messages = " | ".join(validation_report.failed_messages())
-            manager.update_task_status(
-                celery_task_id,
+            manager.update_task_status_by_db_id(
+                task_db_id,
                 TaskStatus.FAILURE,
                 progress=70,
                 log_message=f"Validation failed: {messages}",
             )
             return
 
-        manager.update_task_status(
-            celery_task_id,
+        git_adapter = app_context.create_git_adapter(project)
+        archivist = app_context.create_archivist(git_adapter)
+
+        manager.update_task_status_by_db_id(
+            task_db_id,
             TaskStatus.RUNNING,
             progress=75,
             log_message="Validation passed. Archiving story...",
@@ -475,29 +588,29 @@ def generate_and_process_story_from_seed_task(
 
         archive_result = archivist.archive(
             story_content,
-            universe_context=full_context_string,
+            universe_context=universe_context,
         )
         files_to_commit: dict[str, str] = dict(archive_result.files)
 
         for message in archive_result.log_messages:
-            manager.update_task_status(
-                celery_task_id,
+            manager.update_task_status_by_db_id(
+                task_db_id,
                 TaskStatus.RUNNING,
                 progress=80,
                 log_message=message,
             )
 
         if not files_to_commit:
-            manager.update_task_status(
-                celery_task_id,
+            manager.update_task_status_by_db_id(
+                task_db_id,
                 TaskStatus.FAILURE,
                 progress=82,
                 log_message="Archival produced no files to commit.",
             )
             return
 
-        manager.update_task_status(
-            celery_task_id,
+        manager.update_task_status_by_db_id(
+            task_db_id,
             TaskStatus.RUNNING,
             progress=85,
             log_message="Prepared files for commit.",
@@ -510,8 +623,8 @@ def generate_and_process_story_from_seed_task(
         commit_summary = archive_result.metadata.get("summary", "New story")
         commit_message = f"Add lore entry: {commit_summary}"
 
-        manager.update_task_status(
-            celery_task_id,
+        manager.update_task_status_by_db_id(
+            task_db_id,
             TaskStatus.RUNNING,
             progress=90,
             log_message="Committing story to project repository...",
@@ -522,24 +635,22 @@ def generate_and_process_story_from_seed_task(
             commit_message=commit_message,
         )
 
-        manager.update_task_status(
-            celery_task_id,
+        manager.update_task_status_by_db_id(
+            task_db_id,
             TaskStatus.SUCCESS,
             progress=100,
-            log_message="Story generated, validated, archived, and pushed successfully.",
+            log_message="Story processed and archived successfully.",
         )
     except Exception as exc:  # pragma: no cover - defensive logging
-        logger.exception(
-            "generate_and_process_story_from_seed_task failed: %s",
-            exc,
-        )
-        manager.update_task_status(
-            celery_task_id,
+        logger.exception("process_story_task failed: %s", exc)
+        manager.update_task_status_by_db_id(
+            task_db_id,
             TaskStatus.FAILURE,
-            log_message=f"Task {task_db_id} failed: {exc}",
+            log_message=f"Processing failed: {exc}",
         )
         raise
-
+    finally:
+        self.update_db_task_tokens(tokens["input"], tokens["output"])
 
 @celery_app.task(bind=True, name="app.tasks.lore_tasks.generate_saga_task")
 def generate_saga_task(
@@ -554,6 +665,8 @@ def generate_saga_task(
 
     if chapters < 1:
         raise ValueError("Saga must contain at least one chapter.")
+
+    from app.services.task_manager import TaskManager
 
     manager = TaskManager()
     celery_task_id = self.request.id
@@ -609,7 +722,7 @@ def generate_saga_task(
                 params["pr_id"] = pr_id
             sub_task = manager.create_task(
                 project_id=project.id,
-                task_type="generate_and_process_story_from_seed",
+                task_type="generate_story",
                 params=params,
             )
             current_status_after_dispatch = _get_current_status(task_db_id)
@@ -654,6 +767,7 @@ def generate_saga_task(
 
 __all__ = [
     "uce_process_story_task",
-    "generate_and_process_story_from_seed_task",
+    "generate_story_from_seed_task",
+    "process_story_task",
     "generate_saga_task",
 ]

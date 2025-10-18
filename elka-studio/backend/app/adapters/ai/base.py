@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
-from typing import Any, Dict
+from typing import Any, Dict, Optional, Tuple
 
 from app.utils.config import Config
 
@@ -36,10 +36,26 @@ class BaseAIAdapter(ABC):
 
         raise NotImplementedError
 
-    def generate_json(self, system: str, user: str) -> str:
+    def generate_json(self, system: str, user: str) -> Tuple[str, Optional[Dict[str, int]]]:
         """Return JSON text generated from a system/user prompt pair."""
 
         raise NotImplementedError
+
+    def generate_text(
+        self,
+        prompt: str,
+        model_key: str | None = None,
+    ) -> Tuple[str, Optional[Dict[str, int]]]:
+        """Return a free-form text response with optional token usage metadata."""
+
+        raise NotImplementedError
+
+    def count_tokens(self, text: str) -> int:
+        """Best-effort token counting for adapters that support it."""
+
+        if not text:
+            return 0
+        return len(text.split())
 
 
 @dataclass(slots=True)
@@ -133,19 +149,23 @@ class HeuristicAIAdapter(BaseAIAdapter):
             return f"## Update\n{body}"
         return f"# {title}\n{body}"
 
-    def generate_json(self, system: str, user: str) -> str:
+    def generate_json(
+        self, system: str, user: str
+    ) -> Tuple[str, Optional[Dict[str, int]]]:
         """Return a deterministic JSON payload with system/user fields."""
 
         import json
 
         payload = {"system": system.strip(), "user": user.strip()}
-        return json.dumps(payload)
+        return json.dumps(payload), {"prompt_token_count": 0, "candidates_token_count": 0, "total_tokens": 0}
 
-    def generate_text(self, prompt: str, model_key: str | None = None) -> str:
+    def generate_text(
+        self, prompt: str, model_key: str | None = None
+    ) -> Tuple[str, Optional[Dict[str, int]]]:
         """Return a deterministic text response for the provided prompt."""
 
         cleaned = prompt.strip()
-        return cleaned or ""
+        return cleaned or "", {"prompt_token_count": 0, "candidates_token_count": 0, "total_tokens": 0}
 
 
 def get_default_ai_adapter(config: Config) -> BaseAIAdapter:

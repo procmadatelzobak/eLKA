@@ -61,10 +61,12 @@ def test_task_serialization_includes_payload() -> None:
 
     task = Task(
         project_id=5,
-        type="generate_and_process_story_from_seed",
+        type="generate_story",
         status=TaskStatus.SUCCESS,
         params={"seed": "tajemná knihovna"},
         result={"story": "Byl jednou jeden příběh", "files": {"Lore/story.md": "obsah"}},
+        total_input_tokens=120,
+        total_output_tokens=55,
     )
 
     payload = task.to_dict()
@@ -72,6 +74,8 @@ def test_task_serialization_includes_payload() -> None:
     assert payload["params"] == {"seed": "tajemná knihovna"}
     assert payload["result"]["story"].startswith("Byl jednou")
     assert "Lore/story.md" in payload["result"]["files"]
+    assert payload["total_input_tokens"] == 120
+    assert payload["total_output_tokens"] == 55
 
 
 def test_process_story_response_masks_tokens(monkeypatch: pytest.MonkeyPatch) -> None:
