@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from enum import Enum
 from typing import Dict, List, Literal, Optional
 
 from pydantic import BaseModel, Field
@@ -81,6 +82,55 @@ class UCEReport(BaseModel):
     notes: List[str] = Field(default_factory=list)
 
 
+class EntityType(str, Enum):
+    """Enumeration of supported entity types for archival purposes."""
+
+    CHARACTER = "character"
+    LOCATION = "location"
+    EVENT = "event"
+    CONCEPT = "concept"
+    ITEM = "item"
+    MATERIAL = "material"
+    ORGANIZATION = "organization"
+    OTHER = "other"
+
+
+class ExtractedEntity(BaseModel):
+    """Structured representation of an entity extracted from a story."""
+
+    id: str
+    name: str
+    summary: Optional[str] = None
+    description: Optional[str] = None
+    aliases: List[str] = Field(default_factory=list)
+    attributes: Dict[str, str] = Field(default_factory=dict)
+    entity_type: EntityType = Field(default=EntityType.OTHER)
+
+
+class ExtractedEvent(BaseModel):
+    """Structured representation of an event extracted from a story."""
+
+    id: str
+    name: str
+    summary: Optional[str] = None
+    description: Optional[str] = None
+    date: Optional[str] = None
+    location: Optional[str] = None
+    participants: List[str] = Field(default_factory=list)
+
+
+class ExtractedData(BaseModel):
+    """Aggregate container for all extracted story entities and events."""
+
+    characters: List[ExtractedEntity] = Field(default_factory=list)
+    locations: List[ExtractedEntity] = Field(default_factory=list)
+    events: List[ExtractedEvent] = Field(default_factory=list)
+    concepts: List[ExtractedEntity] = Field(default_factory=list)
+    things: List[ExtractedEntity] = Field(default_factory=list)
+    materials: List[ExtractedEntity] = Field(default_factory=list)
+    others: List[ExtractedEntity] = Field(default_factory=list)
+
+
 __all__ = [
     "FactEntity",
     "FactEvent",
@@ -89,4 +139,8 @@ __all__ = [
     "ChangesetFile",
     "Changeset",
     "UCEReport",
+    "EntityType",
+    "ExtractedEntity",
+    "ExtractedEvent",
+    "ExtractedData",
 ]

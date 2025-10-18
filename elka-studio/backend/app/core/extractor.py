@@ -11,7 +11,13 @@ from pydantic import ValidationError
 
 from app.adapters.ai.base import BaseAIAdapter
 
-from .schemas import FactGraph
+from .schemas import (
+    EntityType,
+    ExtractedData,
+    ExtractedEntity,
+    ExtractedEvent,
+    FactGraph,
+)
 
 
 def _slugify(text: str) -> str:
@@ -63,6 +69,7 @@ STRICT_FACT_GRAPH_TEMPLATE = """
 You are the Universe Consistency Extractor. Reply with JSON **only**.
 Return an object with exactly two keys: "entities" and "events".
 - "entities": array of objects with keys {"id", "type", "labels", "summary", "attributes"}.
+  Valid "type" values include person, place, artifact, organization, concept, material, event, other.
 - "events": array of objects with keys {"id", "title", "date", "location", "participants", "description"}.
 Match the field names exactly. Use slug-style identifiers (lowercase, underscore).
 Do not include markdown, code fences, explanations, or trailing text.
@@ -130,4 +137,69 @@ def extract_fact_graph(story: str, ai: BaseAIAdapter) -> FactGraph:
     raise ValueError(f"Extractor failed to return valid JSON: {last_error}")
 
 
-__all__ = ["extract_fact_graph", "_slugify"]
+def _map_entity_type(raw_type: str) -> EntityType:
+    normalised = (raw_type or "").strip().lower()
+    if normalised in {"person", "character", "being", "creature", "hero", "villain"}:
+        return EntityType.CHARACTER
+    if normalised in {"place", "location", "region", "area", "planet", "realm"}:
+        return EntityType.LOCATION
+    if normalised in {"event", "incident", "battle", "ceremony"}:
+        return EntityType.EVENT
+    if normalised in {"concept", "idea", "philosophy", "belief"}:
+        return EntityType.CONCEPT
+    if normalised in {"artifact", "item", "object", "device", "thing"}:
+        return EntityType.ITEM
+    if normalised in {"material", "substance", "element", "alloy"}:
+        return EntityType.MATERIAL
+    if normalised in {"organization", "organisation", "faction", "guild", "order", "clan"}:
+        return EntityType.ORGANIZATION
+    return EntityType.OTHER
+
+
+def extract_story_entities(story: str, ai: BaseAIAdapter) -> ExtractedData:
+    """Extract structured entity data suitable for archival."""
+
+    fact_graph = extract_fact_graph(story, ai)
+    data = ExtractedData()
+
+    for entity in fact_graph.entities:
+        entity_type = _map_entity_type(entity.type)
+        display_name = entity.summary or entity.id.replace("_", " ").title()
+        extracted = ExtractedEntity(
+            id=entity.id,
+            name=display_name,
+            summary=entity.summary,
+            description=entity.attributes.get("description") or entity.summary,
+            aliases=list(entity.labels),
+            attributes=dict(entity.attributes),
+            entity_type=entity_type,
+        )
+        if entity_type == EntityType.CHARACTER:
+            data.characters.append(extracted)
+        elif entity_type == EntityType.LOCATION:
+            data.locations.append(extracted)
+        elif entity_type == EntityType.CONCEPT:
+            data.concepts.append(extracted)
+        elif entity_type == EntityType.ITEM:
+            data.things.append(extracted)
+        elif entity_type == EntityType.MATERIAL:
+            data.materials.append(extracted)
+        else:
+            data.others.append(extracted)
+
+    for event in fact_graph.events:
+        extracted_event = ExtractedEvent(
+            id=event.id,
+            name=event.title,
+            summary=event.description,
+            description=event.description,
+            date=event.date,
+            location=event.location,
+            participants=list(event.participants),
+        )
+        data.events.append(extracted_event)
+
+    return data
+
+
+__all__ = ["extract_fact_graph", "extract_story_entities", "_slugify"]

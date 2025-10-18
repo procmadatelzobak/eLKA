@@ -8,6 +8,7 @@ eLKA Studio is a full-stack application for building and managing fictional univ
 - **Inline story previews** – Open generated stories and processed files directly from the task queue without leaving the dashboard.
 - **Story & saga generation** – Launch AI-assisted generation pipelines for single stories or multi-chapter sagas.
 - **Automated lore processing** – Validate, archive, and version generated content with Git integration.
+- **Objekty entity archival** – Persist extracted characters, locations, and events into `.txt` files mirroring the `Objekty/` structure used by AI Universe projects.
 - **Universe Consistency Engine** – Extract facts, verify canon conflicts, and propose Git-ready updates.
 - **Extensible architecture** – Modular backend services and a modern React frontend designed for customization.
 
