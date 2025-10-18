@@ -157,6 +157,15 @@ class GeminiAdapter(BaseAIAdapter):
         except (ResourceExhausted, ClientError) as exc:
             self._handle_rate_limit(exc, operation="text generation")
             return "", None
+        except Exception as exc:
+            if isinstance(exc, Retry):
+                raise
+            logger.error(
+                "Unexpected error during Gemini text generation: %s",
+                exc,
+                exc_info=True,
+            )
+            raise
         metadata = self._extract_usage_metadata(response)
         return getattr(response, "text", ""), metadata
 
@@ -190,6 +199,15 @@ class GeminiAdapter(BaseAIAdapter):
         except (ResourceExhausted, ClientError) as exc:
             self._handle_rate_limit(exc, operation="analysis")
             return str(exc)
+        except Exception as exc:
+            if isinstance(exc, Retry):
+                raise
+            logger.error(
+                "Unexpected error during Gemini analysis: %s",
+                exc,
+                exc_info=True,
+            )
+            raise
         return getattr(response, "text", str(response))
 
     def summarise(self, story_content: str) -> str:  # type: ignore[override]
@@ -220,6 +238,15 @@ class GeminiAdapter(BaseAIAdapter):
         except (ResourceExhausted, ClientError) as exc:
             self._handle_rate_limit(exc, operation="JSON generation")
             return "{}", None
+        except Exception as exc:
+            if isinstance(exc, Retry):
+                raise
+            logger.error(
+                "Unexpected error during Gemini JSON generation: %s",
+                exc,
+                exc_info=True,
+            )
+            raise
         try:
             json.loads(text)
         except json.JSONDecodeError as exc:
