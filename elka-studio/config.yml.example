@@ -21,6 +21,7 @@ ai:
   # - "heuristic" (deterministic fallback that avoids external services)
   # - "gemini" (requires GEMINI_API_KEY)
   provider: "heuristic"
+  default_adapter: "heuristic"
   models:
     gemini-pro: "gemini-2.5-pro"
     gemini-flash: "gemini-2.5-flash"
@@ -44,15 +45,17 @@ ai:
   model: "heuristic-v1"
 
 tasks:
+  extraction:
+    model: "gemini-flash"
+  validation:
+    model: "gemini-flash"
   generation:
     model: "gemini-flash"
   seed_generation:
     model: "gemini-pro"
-  extraction:
-    model: "gemini-flash"
-  validation:
-    model: "gemini-pro"
   planning:
+    model: "gemini-pro"
+  generate_chapter:
     model: "gemini-pro"
 
 stories:

@@ -31,6 +31,8 @@ TASK_MAPPING = {
     "generate_and_process_story_from_seed_task": lore_tasks.generate_story_from_seed_task,
     "process_story": lore_tasks.process_story_task,
     "process_story_task": lore_tasks.process_story_task,
+    "generate_chapter": lore_tasks.generate_chapter_task,
+    "generate_chapter_task": lore_tasks.generate_chapter_task,
     "generate_saga": lore_tasks.generate_saga_task,
     "generate_saga_task": lore_tasks.generate_saga_task,
 }
@@ -45,7 +47,14 @@ class TaskManager:
         self.config = app_context.config
         self.ai_adapter_factory = AIAdapterFactory(self.config)
 
-    def create_task(self, project_id: int, task_type: str, params: dict | None = None) -> Task:
+    def create_task(
+        self,
+        project_id: int,
+        task_type: str,
+        params: dict | None = None,
+        *,
+        parent_task_id: int | None = None,
+    ) -> Task:
         """Create a task record and dispatch the corresponding Celery job."""
 
         params = dict(params or {})
@@ -62,6 +71,7 @@ class TaskManager:
                 type=task_type,
                 status=TaskStatus.PENDING,
                 params=persisted_params or None,
+                parent_task_id=parent_task_id,
             )
             session.add(task)
             session.commit()

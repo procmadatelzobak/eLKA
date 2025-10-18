@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 from typing import Dict, Iterable, List, Optional, Tuple, Union
@@ -13,6 +13,8 @@ from app.adapters.ai.base import BaseAIAdapter
 from app.adapters.git.base import GitAdapter
 from app.utils.config import Config
 from app.utils.filesystem import sanitize_filename
+
+from git.exc import GitCommandError
 
 from .extractor import _slugify, extract_story_entities
 from .schemas import (
@@ -40,6 +42,7 @@ class ArchiveResult:
     files: Dict[str, str]
     metadata: Dict[str, str]
     log_messages: List[str]
+    changed_paths: List[str] = field(default_factory=list)
 
 
 class ArchivistEngine:
@@ -57,6 +60,7 @@ class ArchivistEngine:
         *,
         story_file_path: Path,
         universe_context: str | None = None,
+        task_id: int | None = None,
     ) -> ArchiveResult:
         """Write the story to ``story_file_path`` and prepare metadata for committing."""
 
@@ -106,6 +110,8 @@ class ArchivistEngine:
             if key in front_matter:
                 metadata[key] = front_matter[key]
         log_messages = [f"Story archived to {relative_path}"]
+        if task_id is not None:
+            metadata["task_id"] = str(task_id)
 
         extracted_files = {}
         extracted_data: Optional[ExtractedData] = None
@@ -138,7 +144,113 @@ class ArchivistEngine:
             timeline_messages = self._update_timeline(extracted_data.events)
             log_messages.extend(timeline_messages)
 
-        return ArchiveResult(success=True, files=files, metadata=metadata, log_messages=log_messages)
+        changed_paths = [relative_path]
+        changed_paths.extend(extracted_files.keys())
+
+        return ArchiveResult(
+            success=True,
+            files=files,
+            metadata=metadata,
+            log_messages=log_messages,
+            changed_paths=sorted(set(changed_paths)),
+        )
+
+    def commit_to_branch(
+        self,
+        *,
+        task_id: int,
+        commit_message: str,
+        expected_files: Optional[Iterable[str]] = None,
+    ) -> tuple[str, List[str]]:
+        """Stage changes, commit them on a dedicated branch, and push to origin."""
+
+        branch_name = self._prepare_branch_name(task_id)
+        base_branch = self.config.default_branch
+        logger.debug("Preparing branch '%s' based on '%s'", branch_name, base_branch)
+        self.git_adapter.create_branch(branch_name, base=base_branch)
+
+        changed_paths = set(expected_files or [])
+        changed_paths.update(self._collect_changed_paths())
+
+        if not changed_paths:
+            logger.info("No repository changes detected for task %s; skipping commit.", task_id)
+            self._checkout_default_branch()
+            return branch_name, []
+
+        try:
+            self.git_adapter.repo.index.add(sorted(changed_paths))
+        except GitCommandError as exc:
+            logger.error("Failed to stage files for task %s: %s", task_id, exc)
+            raise
+
+        if not self.git_adapter.repo.is_dirty(
+            index=True, working_tree=True, untracked_files=True
+        ):
+            logger.info(
+                "Repository clean after staging for task %s; nothing to commit.", task_id
+            )
+            self._checkout_default_branch()
+            return branch_name, sorted(changed_paths)
+
+        commit = self.git_adapter.repo.index.commit(commit_message)
+        try:
+            self.git_adapter.push_branch(branch_name)
+        except Exception:
+            # Attempt to switch back even when push fails
+            self._checkout_default_branch()
+            raise
+
+        logger.info(
+            "Changes for task %s pushed to branch: %s (commit %s)",
+            task_id,
+            branch_name,
+            commit.hexsha,
+        )
+        self._checkout_default_branch()
+        return branch_name, sorted(changed_paths)
+
+    def _prepare_branch_name(self, task_id: int) -> str:
+        base_name = f"elka-task-{task_id}"
+        existing = {head.name for head in self.git_adapter.repo.branches}
+        if base_name not in existing:
+            return base_name
+
+        timestamp = datetime.utcnow().strftime("%Y%m%d%H%M%S")
+        counter = 1
+        candidate = f"{base_name}-{timestamp}"
+        while candidate in existing:
+            counter += 1
+            candidate = f"{base_name}-{timestamp}-{counter}"
+        return candidate
+
+    def _collect_changed_paths(self) -> List[str]:
+        try:
+            status_output = self.git_adapter.repo.git.status("--porcelain")
+        except GitCommandError as exc:
+            logger.error("Failed to inspect repository status: %s", exc)
+            return []
+
+        paths: List[str] = []
+        for raw_line in status_output.splitlines():
+            line = raw_line.strip()
+            if not line:
+                continue
+            entry = line[3:] if len(line) > 3 else ""
+            if " -> " in entry:
+                entry = entry.split(" -> ", 1)[1]
+            entry = entry.strip()
+            if entry:
+                paths.append(entry)
+        return paths
+
+    def _checkout_default_branch(self) -> None:
+        target_branch = self.config.default_branch
+        try:
+            self.git_adapter.repo.git.checkout(target_branch)
+        except GitCommandError as exc:
+            logger.warning(
+                "Failed to checkout default branch '%s': %s", target_branch, exc
+            )
 
     def _archive_extracted_data(self, extracted_data: ExtractedData) -> Dict[str, str]:
         """Persist extracted entities and return the written files."""

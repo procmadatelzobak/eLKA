@@ -78,7 +78,8 @@
   color: #0f172a;
 }
 
-.settings-page__field input {
+.settings-page__field input,
+.settings-page__field select {
   padding: 0.75rem 0.9rem;
   border-radius: 0.7rem;
   border: 1px solid #cbd5f5;
@@ -86,10 +87,18 @@
   transition: border-color 0.2s ease, box-shadow 0.2s ease;
 }
 
-.settings-page__field input:focus {
+.settings-page__field input:focus,
+.settings-page__field select:focus {
   outline: none;
   border-color: #6366f1;
   box-shadow: 0 0 0 4px rgba(99, 102, 241, 0.15);
+}
+
+.settings-page__helper {
+  margin: 0.35rem 0 0;
+  font-weight: 400;
+  font-size: 0.9rem;
+  color: #64748b;
 }
 
 .settings-page__status {

@@ -207,6 +207,16 @@ class Config:
     def get_default_adapter(self) -> str:
         """Return the default AI adapter name derived from configuration."""
 
+        ai_config = self.data.get("ai", {})
+        configured = str(ai_config.get("default_adapter", "")).strip().lower()
+        if configured in {"gemini", "heuristic"}:
+            if configured == "gemini" and not self.get_gemini_api_key():
+                logger.warning(
+                    "Configured default adapter 'gemini' but no API key is available; falling back to 'heuristic'."
+                )
+                return "heuristic"
+            return configured
+
         provider = self.ai_provider()
         return provider or "heuristic"
 
@@ -234,13 +244,14 @@ class Config:
 
         defaults = {
             "generation": "gemini-flash",
-            "seed_generation": "gemini-flash",
+            "seed_generation": "gemini-pro",
             "extraction": "gemini-flash",
-            "validation": "gemini-pro",
+            "validation": "gemini-flash",
             "planning": "gemini-pro",
+            "generate_chapter": "gemini-pro",
         }
         if task_type == "seed_generation":
-            return defaults["generation"]
+            return defaults.get("seed_generation", defaults["generation"])
         return defaults.get(task_type, "gemini-pro")
 
     def get_model_name_for_task(self, task_type: str) -> str:

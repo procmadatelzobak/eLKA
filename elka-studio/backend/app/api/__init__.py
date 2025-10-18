@@ -1,3 +1,3 @@
 """API package for eLKA Studio."""
 
-__all__ = ["projects", "tasks", "websockets"]
+__all__ = ["projects", "tasks", "settings", "websockets"]

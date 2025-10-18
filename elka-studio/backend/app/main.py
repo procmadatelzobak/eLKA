@@ -8,7 +8,7 @@ from typing import Iterable, List
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from .api import projects, root, tasks, websockets
+from .api import projects, root, settings, tasks, websockets
 from .db.session import Base, engine
 
 # Import models so that SQLAlchemy registers the tables on metadata creation
@@ -53,7 +53,7 @@ API_PREFIX = "/api"
 
 def include_routers(application: FastAPI) -> None:
     """Attach all API routers to the provided application instance."""
-    api_routers: List = [projects.router, root.router, tasks.router]
+    api_routers: List = [projects.router, root.router, tasks.router, settings.router]
     for router in api_routers:
         application.include_router(router, prefix=API_PREFIX)
 

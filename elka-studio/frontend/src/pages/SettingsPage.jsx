@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { GEMINI_API_KEY_STORAGE_KEY } from '../services/api';
+import { GEMINI_API_KEY_STORAGE_KEY, fetchAiSettings, updateAiSettings } from '../services/api';
 import './SettingsPage.css';
 
 const SettingsPage = () => {
@@ -8,6 +8,8 @@ const SettingsPage = () => {
   const [apiKey, setApiKey] = useState('');
   const [status, setStatus] = useState(null);
   const [isSaving, setIsSaving] = useState(false);
+  const [defaultAdapter, setDefaultAdapter] = useState('heuristic');
+  const [isLoadingAdapter, setIsLoadingAdapter] = useState(true);
 
   useEffect(() => {
     if (typeof window === 'undefined') {
@@ -20,6 +22,35 @@ const SettingsPage = () => {
     }
   }, []);
 
+  useEffect(() => {
+    let active = true;
+    fetchAiSettings()
+      .then((settings) => {
+        if (!active || !settings) {
+          return;
+        }
+        if (settings.default_adapter) {
+          setDefaultAdapter(settings.default_adapter);
+        }
+      })
+      .catch((error) => {
+        console.error('Failed to load AI settings', error);
+        setStatus({
+          type: 'error',
+          message: 'Failed to load AI settings. Ensure config.yml exists on the server.',
+        });
+      })
+      .finally(() => {
+        if (active) {
+          setIsLoadingAdapter(false);
+        }
+      });
+
+    return () => {
+      active = false;
+    };
+  }, []);
+
   const statusClassName = useMemo(() => {
     if (!status) {
       return '';
@@ -28,7 +59,7 @@ const SettingsPage = () => {
     return `settings-page__status settings-page__status--${status.type}`;
   }, [status]);
 
-  const handleSubmit = (event) => {
+  const handleSubmit = async (event) => {
     event.preventDefault();
     setIsSaving(true);
 
@@ -40,11 +71,15 @@ const SettingsPage = () => {
       const trimmedKey = apiKey.trim();
       if (trimmedKey) {
         window.localStorage.setItem(GEMINI_API_KEY_STORAGE_KEY, trimmedKey);
-        setStatus({ type: 'success', message: 'Gemini API Key saved for this browser.' });
       } else {
         window.localStorage.removeItem(GEMINI_API_KEY_STORAGE_KEY);
-        setStatus({ type: 'info', message: 'Gemini API Key removed from this browser.' });
       }
+
+      await updateAiSettings({ default_adapter: defaultAdapter });
+      setStatus({
+        type: 'success',
+        message: 'Settings saved. Restart the backend to apply the new adapter.',
+      });
     } catch (error) {
       console.error('Failed to persist Gemini API Key', error);
       setStatus({ type: 'error', message: 'Failed to save settings. Please try again.' });
@@ -83,6 +118,23 @@ const SettingsPage = () => {
               onChange={(event) => setApiKey(event.target.value)}
               placeholder="Paste your secret key here"
             />
+          </label>
+
+          <label className="settings-page__field" htmlFor="defaultAdapter">
+            <span>Default AI Adapter</span>
+            <select
+              id="defaultAdapter"
+              name="defaultAdapter"
+              value={defaultAdapter}
+              onChange={(event) => setDefaultAdapter(event.target.value)}
+              disabled={isLoadingAdapter || isSaving}
+            >
+              <option value="gemini">Gemini (cloud)</option>
+              <option value="heuristic">Heuristic (offline fallback)</option>
+            </select>
+            <p className="settings-page__helper">
+              Changes require a backend restart. Gemini mode also needs a valid API key.
+            </p>
           </label>
 
           {status && (
