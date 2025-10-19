@@ -149,6 +149,7 @@ Run `bash scripts/update.sh` (or `make setup` again) to pull the latest code and
 ## Troubleshooting
 - **Redis connection errors**: Ensure Redis is available locally or via Docker. Use `make stop` to clean up the development container.
 - **Backend fails to start**: Confirm that `backend/venv` exists and that `config.yml` contains valid values (especially `security.secret_key`). If the virtual environment becomes corrupted or is missing activation scripts, rerun `make setup` so the installer can recreate it automatically.
+- **Legacy SQLite schema**: Older installations might miss recently added columns (for example `tasks.parent_task_id`). The backend now inspects the database on startup and adds any missing nullable columns automatically. Restart the server after pulling new code to let the synchronisation run; no manual migration is required for default setups.
 - **ModuleNotFoundError during `make run-dev`**: The helper script now checks for critical backend modules (such as `limits`) and reinstalls `backend/requirements.txt` automatically if they are missing. If errors persist, remove `backend/venv` and run `make setup` to recreate the environment from scratch.
 - **Node dependencies missing**: Re-run `npm install` inside the `frontend/` directory or execute `make setup`.
 
