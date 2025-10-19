@@ -320,28 +320,66 @@ def uce_process_story_task(
     self,
     task_db_id: int,
     project_id: int,
-    story_text: str,
+    story_text: str | None = None,
     apply: bool = False,
+    *,
+    story_file_path: str | None = None,
+    saga_theme: str | None = None,
+    remaining_story_filenames: Optional[List[str]] | None = None,
 ) -> None:
-    """Execute the Universe Consistency Engine pipeline."""
+    """Execute the Universe Consistency Engine pipeline.
+
+    When ``story_file_path`` is provided the task loads the chapter content from
+    disk and, on success, chains execution to the remaining chapters to avoid
+    running multiple Git operations in parallel.
+    """
 
     from app.services.task_manager import TaskManager
 
     manager = TaskManager()
     celery_task_id = self.request.id
 
+    start_message = (
+        f"Task {task_db_id}: starting Universe Consistency Engine run."
+        if not story_file_path
+        else (
+            "Task %s: starting Universe Consistency Engine run for '%s'."
+            % (task_db_id, story_file_path)
+        )
+    )
     manager.update_task_status(
         celery_task_id,
         TaskStatus.RUNNING,
         progress=5,
-        log_message=f"Task {task_db_id}: starting Universe Consistency Engine run.",
+        log_message=start_message,
     )
 
     try:
-        story_text = story_text.strip()
-
         project = app_context.git_manager.get_project_from_db(project_id)
         project_path = app_context.git_manager.resolve_project_path(project)
+
+        story_text = (story_text or "").strip()
+
+        if not story_text and story_file_path:
+            candidate_path = Path(story_file_path)
+            if not candidate_path.is_absolute():
+                candidate_path = Path(project_path) / candidate_path
+
+            try:
+                story_text = candidate_path.read_text(encoding="utf-8").strip()
+            except OSError as exc:
+                logger.exception(
+                    "Failed to load story content from %s: %s",
+                    candidate_path,
+                    exc,
+                )
+                raise
+
+        if not story_text:
+            raise ValueError(
+                "story_text must be provided either directly or via story_file_path"
+            )
+
         manager.update_task_status(
             celery_task_id,
             TaskStatus.RUNNING,
@@ -455,8 +493,29 @@ def uce_process_story_task(
                 "files": [file.path for file in changeset.files],
                 "mode": "apply",
                 "approval_required": True,
+                "story_file_path": story_file_path,
             },
         )
+
+        if remaining_story_filenames:
+            next_story_filename = remaining_story_filenames[0]
+            new_remaining_list = remaining_story_filenames[1:]
+            logger.info(
+                "Queueing sequential UCE processing for %s (remaining %s)",
+                next_story_filename,
+                len(new_remaining_list),
+            )
+            uce_process_story_task.apply_async(
+                args=[task_db_id],
+                kwargs={
+                    "project_id": project_id,
+                    "story_text": None,
+                    "apply": apply,
+                    "story_file_path": next_story_filename,
+                    "saga_theme": saga_theme,
+                    "remaining_story_filenames": new_remaining_list,
+                },
+            )
     except Exception as exc:  # pragma: no cover - defensive logging
         if isinstance(exc, Retry):
             raise
@@ -1198,6 +1257,7 @@ def generate_saga_task(
 
         previous_content: Optional[str] = None
         chapter_results: List[Dict[str, Any]] = []
+        story_filenames: List[str] = []
 
         for index, chapter_plan in enumerate(chapters_data, start=1):
             _wait_while_paused(task_db_id)
@@ -1258,6 +1318,10 @@ def generate_saga_task(
                 raise
 
             previous_content = chapter_payload.get("content")
+            chapter_metadata = chapter_payload.get("metadata") or {}
+            relative_path = chapter_metadata.get("relative_path")
+            if isinstance(relative_path, str) and relative_path:
+                story_filenames.append(relative_path)
             chapter_results.append(
                 {
                     "task_id": chapter_task.id,
@@ -1282,6 +1346,12 @@ def generate_saga_task(
             logger.info("Saga task %s paused after chapter loop.", task_db_id)
             return
 
+        final_result = {
+            "saga_outline": outline_data,
+            "chapters": chapter_results,
+            "saga_theme": theme,
+            "story_files": story_filenames,
+        }
         manager.update_task_status(
             celery_task_id,
             TaskStatus.SUCCESS,
@@ -1290,12 +1360,32 @@ def generate_saga_task(
                 "Saga generation completed. Review chapter tasks and approve to"
                 f" publish changes to {manager.config.default_branch}."
             ),
-            result={
-                "saga_outline": outline_data,
-                "chapters": chapter_results,
-                "saga_theme": theme,
-            },
+            result=final_result,
         )
+
+        if story_filenames:
+            first_story = story_filenames[0]
+            remaining_stories = story_filenames[1:]
+            manager.update_task_status(
+                celery_task_id,
+                TaskStatus.SUCCESS,
+                log_message=(
+                    "Starting sequential Universe Consistency Engine processing for"
+                    f" generated chapters beginning with '{first_story}'."
+                ),
+                result={"story_files": story_filenames},
+            )
+            uce_process_story_task.apply_async(
+                args=[task_db_id],
+                kwargs={
+                    "project_id": project.id,
+                    "story_text": None,
+                    "apply": True,
+                    "story_file_path": first_story,
+                    "saga_theme": theme,
+                    "remaining_story_filenames": remaining_stories,
+                },
+            )
     except Exception as exc:  # pragma: no cover - defensive logging
         if isinstance(exc, Retry):
             raise
