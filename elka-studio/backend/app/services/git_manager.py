@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import configparser
 import os
+import shlex
 import shutil
 import subprocess
 from pathlib import Path
@@ -209,7 +210,7 @@ class GitManager:
         env.update(GitManager._build_command_env(token))
         if not token:
             env.pop("GIT_TOKEN", None)
-            env.pop("GIT_CONFIG_PARAMETERS", None)
+            env.pop("GIT_CREDENTIAL_HELPER", None)
         return env
 
     @staticmethod
@@ -221,9 +222,8 @@ class GitManager:
         if token:
             helper_path = Path(__file__).parent / "git_credential_helper.sh"
             env["GIT_TOKEN"] = token
-            env["GIT_CONFIG_PARAMETERS"] = (
-                f"credential.helper=!sh '{helper_path.resolve()}'"
-            )
+            quoted_helper = shlex.quote(str(helper_path.resolve()))
+            env["GIT_CREDENTIAL_HELPER"] = f"!sh {quoted_helper}"
         return env
 
     @staticmethod
