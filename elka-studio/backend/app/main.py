@@ -10,6 +10,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from .api import projects, root, settings, tasks, websockets
 from .db.session import Base, engine
+from .db.schema_sync import synchronize_sqlite_schema
 
 # Import models so that SQLAlchemy registers the tables on metadata creation
 from .models import project, task  # noqa: F401  pylint: disable=unused-import
@@ -77,6 +78,7 @@ def create_app() -> FastAPI:
     async def on_startup() -> None:  # pragma: no cover - side effect only
         """Create database tables on application startup."""
         Base.metadata.create_all(bind=engine)
+        synchronize_sqlite_schema(engine, Base.metadata)
 
     return application
 
