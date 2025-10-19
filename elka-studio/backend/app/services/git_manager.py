@@ -50,7 +50,7 @@ class GitManager:
             command = [
                 "git",
                 "-c",
-                f"credential.helper=!sh {helper_path.resolve()}",
+                f"credential.helper=!sh '{helper_path.resolve()}'",
                 "clone",
                 git_url,
                 str(target_path),
@@ -116,7 +116,7 @@ class GitManager:
             command = [
                 "git",
                 "-c",
-                f"credential.helper=!sh {helper_path.resolve()}",
+                f"credential.helper=!sh '{helper_path.resolve()}'",
                 "-C",
                 str(repo_path),
                 "push",
