@@ -12,7 +12,9 @@ from ..utils.config import load_config
 
 _config = load_config()
 _storage_config = _config.get("storage", {})
-_database_path = Path(_storage_config.get("database_file", "~/.elka/elka.db")).expanduser()
+_database_path = Path(
+    _storage_config.get("database_file", "~/.elka/elka.db")
+).expanduser()
 _database_path.parent.mkdir(parents=True, exist_ok=True)
 
 database_url = f"sqlite:///{_database_path}"

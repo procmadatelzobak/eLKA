@@ -32,13 +32,17 @@ class GitAdapter:
             / "services"
             / "git_credential_helper.sh"
         )
-        if self._token and not self._credential_helper.is_file():  # pragma: no cover - defensive
+        if (
+            self._token and not self._credential_helper.is_file()
+        ):  # pragma: no cover - defensive
             raise FileNotFoundError(
                 f"Credential helper script not found at {self._credential_helper}"
             )
         try:
             self.repo = git.Repo(self.project_path)
-        except git.InvalidGitRepositoryError as exc:  # pragma: no cover - defensive branch
+        except (
+            git.InvalidGitRepositoryError
+        ) as exc:  # pragma: no cover - defensive branch
             raise RuntimeError(f"{self.project_path} is not a git repository") from exc
 
     def write_files(self, files: dict[str, str]) -> list[Path]:
@@ -166,7 +170,9 @@ class GitAdapter:
             try:
                 self.repo.git.checkout(target)
             except GitCommandError:
-                if current_branch and current_branch in {head.name for head in self.repo.branches}:
+                if current_branch and current_branch in {
+                    head.name for head in self.repo.branches
+                }:
                     try:
                         self.repo.git.checkout(current_branch)
                     except GitCommandError:
@@ -215,7 +221,9 @@ class GitAdapter:
                 text=True,
                 env=env,
             )
-        except subprocess.CalledProcessError as exc:  # pragma: no cover - network interaction
+        except (
+            subprocess.CalledProcessError
+        ) as exc:  # pragma: no cover - network interaction
             message = exc.stderr or exc.stdout or str(exc)
             raise RuntimeError(f"Failed to push changes: {message}") from exc
 
@@ -236,7 +244,9 @@ class GitAdapter:
             raise ValueError("No files supplied for commit")
 
         written_paths = self.write_files(files)
-        rel_paths: Iterable[str] = [str(path.relative_to(self.project_path)) for path in written_paths]
+        rel_paths: Iterable[str] = [
+            str(path.relative_to(self.project_path)) for path in written_paths
+        ]
         self.repo.index.add(list(rel_paths))
 
         if not self.repo.is_dirty(index=True, working_tree=True, untracked_files=True):

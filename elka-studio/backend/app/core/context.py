@@ -65,7 +65,9 @@ class AppContext:
     @property
     def validator(self) -> ValidatorEngine:
         if self._validator is None:
-            self._validator = ValidatorEngine(ai_adapter=self.validator_ai, config=self.config)
+            self._validator = ValidatorEngine(
+                ai_adapter=self.validator_ai, config=self.config
+            )
         return self._validator
 
     def create_git_adapter(self, project: Project) -> GitAdapter:
@@ -96,7 +98,9 @@ class AppContext:
         try:
             return decrypt(encrypted, secret_key)
         except Exception as exc:  # pragma: no cover - defensive logging
-            logger.error("Failed to decrypt Git token for project %s: %s", project.id, exc)
+            logger.error(
+                "Failed to decrypt Git token for project %s: %s", project.id, exc
+            )
             return None
 
 

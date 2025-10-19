@@ -15,6 +15,7 @@ from .db.session import Base, engine
 from .models import project, task  # noqa: F401  pylint: disable=unused-import
 from .utils.config import load_config
 
+
 def _configure_cors(application: FastAPI) -> None:
     """Attach CORS middleware with defaults suitable for local development."""
 
@@ -28,13 +29,19 @@ def _configure_cors(application: FastAPI) -> None:
 
     env_origins = os.getenv("ELKA_ALLOWED_ORIGINS")
     if env_origins:
-        allowed_origins = [origin.strip() for origin in env_origins.split(",") if origin.strip()]
+        allowed_origins = [
+            origin.strip() for origin in env_origins.split(",") if origin.strip()
+        ]
     else:
         configured_origins = cors_settings.get("allow_origins", default_origins)
         if isinstance(configured_origins, str):
             allowed_origins = [configured_origins]
         else:
-            allowed_origins = list(configured_origins) if isinstance(configured_origins, Iterable) else default_origins
+            allowed_origins = (
+                list(configured_origins)
+                if isinstance(configured_origins, Iterable)
+                else default_origins
+            )
 
     if not allowed_origins:
         allowed_origins = default_origins

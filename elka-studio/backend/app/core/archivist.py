@@ -27,7 +27,9 @@ from .schemas import (
     FactGraph,
 )
 
-TEMPLATES_ROOT = Path(__file__).resolve().parent.parent / "templates" / "universe_scaffold"
+TEMPLATES_ROOT = (
+    Path(__file__).resolve().parent.parent / "templates" / "universe_scaffold"
+)
 
 logger = logging.getLogger(__name__)
 
@@ -48,7 +50,9 @@ class ArchiveResult:
 class ArchivistEngine:
     """Persist validated stories into the lore repository."""
 
-    def __init__(self, git_adapter: GitAdapter, ai_adapter: BaseAIAdapter, config: Config) -> None:
+    def __init__(
+        self, git_adapter: GitAdapter, ai_adapter: BaseAIAdapter, config: Config
+    ) -> None:
         self.git_adapter = git_adapter
         self.ai_adapter = ai_adapter
         self.config = config
@@ -69,7 +73,11 @@ class ArchivistEngine:
         target_path = story_file_path
         if not isinstance(target_path, Path):
             target_path = Path(target_path)
-        absolute_path = target_path if target_path.is_absolute() else self.project_path / target_path
+        absolute_path = (
+            target_path
+            if target_path.is_absolute()
+            else self.project_path / target_path
+        )
 
         try:
             absolute_path.parent.mkdir(parents=True, exist_ok=True)
@@ -79,7 +87,9 @@ class ArchivistEngine:
             logger.error("Failed to write story file %s: %s", absolute_path, exc)
             fallback_directory = self.config.ensure_story_directory(self.project_path)
             fallback_name = target_path.stem or "story"
-            fallback_path = fallback_directory / self.config.story_filename(fallback_name)
+            fallback_path = fallback_directory / self.config.story_filename(
+                fallback_name
+            )
             try:
                 fallback_path.write_text(story_content, encoding="utf-8")
                 logger.info("Story file saved to fallback path: %s", fallback_path)
@@ -173,7 +183,9 @@ class ArchivistEngine:
         changed_paths.update(self._collect_changed_paths())
 
         if not changed_paths:
-            logger.info("No repository changes detected for task %s; skipping commit.", task_id)
+            logger.info(
+                "No repository changes detected for task %s; skipping commit.", task_id
+            )
             self._checkout_default_branch()
             return branch_name, []
 
@@ -187,7 +199,8 @@ class ArchivistEngine:
             index=True, working_tree=True, untracked_files=True
         ):
             logger.info(
-                "Repository clean after staging for task %s; nothing to commit.", task_id
+                "Repository clean after staging for task %s; nothing to commit.",
+                task_id,
             )
             self._checkout_default_branch()
             return branch_name, sorted(changed_paths)
@@ -312,7 +325,9 @@ class ArchivistEngine:
                     archived[path] = content
 
         if extracted_data.others:
-            logger.info("Archiving %s uncategorised entities...", len(extracted_data.others))
+            logger.info(
+                "Archiving %s uncategorised entities...", len(extracted_data.others)
+            )
             for entity in extracted_data.others:
                 logger.debug("Attempting to archive entity: %s", entity.name)
                 result = self._archive_entity(entity, EntityType.OTHER)
@@ -400,7 +415,12 @@ class ArchivistEngine:
 
         if entity.aliases:
             lines.append("")
-            lines.append("Aliases: " + ", ".join(sorted({alias.strip() for alias in entity.aliases if alias.strip()})))
+            lines.append(
+                "Aliases: "
+                + ", ".join(
+                    sorted({alias.strip() for alias in entity.aliases if alias.strip()})
+                )
+            )
             details_added = True
 
         if entity.attributes:
@@ -464,7 +484,9 @@ class ArchivistEngine:
             if event.location:
                 descriptors.append(f"Location: {event.location}")
             participants = ", ".join(
-                sorted({participant for participant in event.participants if participant})
+                sorted(
+                    {participant for participant in event.participants if participant}
+                )
             )
             if participants:
                 descriptors.append(f"Participants: {participants}")
@@ -497,7 +519,9 @@ class ArchivistEngine:
             return []
 
         relative_path = timeline_path.relative_to(self.project_path)
-        message = f"Timeline updated with {len(new_entries)} event(s) in {relative_path}."
+        message = (
+            f"Timeline updated with {len(new_entries)} event(s) in {relative_path}."
+        )
         logger.info(message)
         return [message]
 
@@ -524,7 +548,11 @@ class ArchivistEngine:
 
         if event.participants:
             lines.append("")
-            participants = ", ".join(sorted({participant for participant in event.participants if participant}))
+            participants = ", ".join(
+                sorted(
+                    {participant for participant in event.participants if participant}
+                )
+            )
             lines.append(f"Participants: {participants}")
 
         content = "\n".join(lines).strip() + "\n"
@@ -534,6 +562,7 @@ class ArchivistEngine:
     def _slugify(value: str) -> str:
         sanitized = sanitize_filename(value, default="story")
         return sanitized[:40]
+
 
 def _parse_front_matter(text: str) -> dict[str, str]:
     match = re.match(r"^---\n(?P<body>.+?)\n---\n", text, flags=re.DOTALL)

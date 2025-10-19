@@ -28,6 +28,10 @@ eLKA Studio is a full-stack application for building and managing fictional univ
 7. On first launch, open the **Settings** page (gear icon) in the left navigation pane, store your Gemini API key, and pick the default AI adapter (Gemini or the offline heuristic). The key is saved securely in your browser (localStorage) and adapter changes persist to `config.yml`.
 8. Return to the **Projects** page and click **Add/Import Project**—the same dialog now supports both initializing a new universe and connecting to an existing lore repository. The form accepts either the shorthand `user/project` or a full Git URL. If the import fails, the dialog shows the error message together with the HTTP status code, and the backend logs the full traceback so you can diagnose the issue directly from the terminal.
 
+## Continuous Integration
+
+All changes pushed to or proposed against the `main` branch trigger the **Backend CI** workflow defined in `.github/workflows/backend-ci.yml`. The pipeline installs the backend dependencies, enforces the Ruff formatter and linter, and executes the backend test-suite via `pytest elka-studio/backend/tests/`. Run the same commands locally before opening a pull request to match the automation and keep the branch history green.
+
 ## Configuration
 - The backend CORS policy is loaded from `config.yml` (section `cors.allow_origins`). The defaults allow the development frontend at `http://127.0.0.1:5173` and `http://localhost:5173`. If you need more domains, add them to the list or set the `ELKA_ALLOWED_ORIGINS` environment variable with comma-separated URLs. The CORS middleware initializes before routers are registered, so both the backend and Celery worker modules load without `NameError` exceptions.
 - The `security.secret_key` section in `config.yml` replaces the need for the `SECRET_KEY` environment variable. The backend and Celery worker automatically read the value from configuration and use it when encrypting stored Git tokens. If you still define the environment variable, it takes precedence over the configuration value.

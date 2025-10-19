@@ -24,6 +24,7 @@ from app.utils.filesystem import sanitize_filename
 
 logger = logging.getLogger(__name__)
 
+
 def find_config_file() -> Optional[Path]:
     """Return the first configuration file discovered for the application."""
     env_path = os.getenv("ELKA_CONFIG_PATH")

@@ -13,7 +13,10 @@ from .extractor import _slugify
 from .schemas import Changeset, ChangesetFile, FactEntity, FactEvent, FactGraph
 
 TEMPLATE_TIMELINE = (
-    Path(__file__).resolve().parent.parent / "templates" / "universe_scaffold" / "timeline.md"
+    Path(__file__).resolve().parent.parent
+    / "templates"
+    / "universe_scaffold"
+    / "timeline.md"
 )
 
 
@@ -79,10 +82,16 @@ def plan_changes(
             summary_text = _render_update_body(entity, writer)
             if not summary_text:
                 # Empty updates should not modify the file.
-                new_content = old_content if old_content.endswith("\n") else f"{old_content}\n"
+                new_content = (
+                    old_content if old_content.endswith("\n") else f"{old_content}\n"
+                )
             else:
                 if "## Update" not in cleaned_existing:
-                    base_body = cleaned_existing.split("\n", 1)[1] if "\n" in cleaned_existing else ""
+                    base_body = (
+                        cleaned_existing.split("\n", 1)[1]
+                        if "\n" in cleaned_existing
+                        else ""
+                    )
                     if base_body.strip() == summary_text.strip():
                         new_content = cleaned_existing + "\n"
                         if old_content == new_content:
@@ -120,7 +129,9 @@ def plan_changes(
                     None,
                     [
                         f"{entity_updates} entity file(s)" if entity_updates else "",
-                        f"{timeline_change} timeline entry(ies)" if timeline_change else "",
+                        f"{timeline_change} timeline entry(ies)"
+                        if timeline_change
+                        else "",
                     ],
                 )
             )
@@ -145,7 +156,8 @@ def _plan_timeline_updates(
     header, existing_events, footer = _split_timeline(existing_lines)
     existing_line_set = {item["line"].strip() for item in existing_events}
     existing_keys = {
-        _normalize_date_key(item["date"], _slugify(item["title"])) for item in existing_events
+        _normalize_date_key(item["date"], _slugify(item["title"]))
+        for item in existing_events
     }
 
     additions: list[dict[str, str | None]] = []
@@ -201,13 +213,17 @@ def _load_timeline(repo_path: Path) -> tuple[Path, str | None, str]:
             return candidate, text, text
 
     template_text = (
-        TEMPLATE_TIMELINE.read_text(encoding="utf-8") if TEMPLATE_TIMELINE.is_file() else "# Timeline\n"
+        TEMPLATE_TIMELINE.read_text(encoding="utf-8")
+        if TEMPLATE_TIMELINE.is_file()
+        else "# Timeline\n"
     )
     timeline_path = repo_path / "timeline.md"
     return timeline_path, None, template_text
 
 
-def _split_timeline(lines: List[str]) -> tuple[List[str], List[dict[str, str | None]], List[str]]:
+def _split_timeline(
+    lines: List[str],
+) -> tuple[List[str], List[dict[str, str | None]], List[str]]:
     header: list[str] = []
     events: list[dict[str, str | None]] = []
     footer: list[str] = []

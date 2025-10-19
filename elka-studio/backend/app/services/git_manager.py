@@ -59,7 +59,9 @@ class GitManager:
                 text=True,
                 env=env,
             )
-        except subprocess.CalledProcessError as exc:  # pragma: no cover - network interaction
+        except (
+            subprocess.CalledProcessError
+        ) as exc:  # pragma: no cover - network interaction
             message = exc.stderr or exc.stdout or str(exc)
             raise RuntimeError(f"Failed to clone repository: {message}") from exc
         return target_path
@@ -124,9 +126,13 @@ class GitManager:
                 text=True,
                 env=env,
             )
-        except subprocess.CalledProcessError as exc:  # pragma: no cover - network interaction
+        except (
+            subprocess.CalledProcessError
+        ) as exc:  # pragma: no cover - network interaction
             message = exc.stderr or exc.stdout or str(exc)
-            raise RuntimeError(f"Failed to push repository scaffold: {message}") from exc
+            raise RuntimeError(
+                f"Failed to push repository scaffold: {message}"
+            ) from exc
 
     def pull_updates(self, project_name: str) -> None:
         """Pull the latest changes from the remote default branch."""
@@ -177,7 +183,11 @@ class GitManager:
         except ValueError:
             origin = None
         if origin is not None:
-            remote_heads = {ref.remote_head for ref in origin.refs if getattr(ref, "remote_head", None)}
+            remote_heads = {
+                ref.remote_head
+                for ref in origin.refs
+                if getattr(ref, "remote_head", None)
+            }
             if "main" in remote_heads:
                 branch = "main"
             elif "master" in remote_heads:
@@ -213,9 +223,7 @@ class GitManager:
         session = self._session_factory()
         try:
             project = (
-                session.query(Project)
-                .filter(Project.id == project_id)
-                .one_or_none()
+                session.query(Project).filter(Project.id == project_id).one_or_none()
             )
             if project is None:
                 raise ValueError(f"Project with id {project_id} does not exist")
@@ -247,7 +255,14 @@ class GitManager:
         self,
         project_path: Path | str,
         *,
-        suffixes: Iterable[str] = (".md", ".markdown", ".txt", ".json", ".yaml", ".yml"),
+        suffixes: Iterable[str] = (
+            ".md",
+            ".markdown",
+            ".txt",
+            ".json",
+            ".yaml",
+            ".yml",
+        ),
     ) -> dict[str, str]:
         """Return a mapping of relative file paths to their textual contents.
 

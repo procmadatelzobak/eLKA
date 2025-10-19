@@ -72,11 +72,11 @@ def _build_story_document(
     relative_path = Path("stories") / story_filename
     front_matter_lines = [
         "---",
-        f"title: \"{_escape_front_matter(resolved_title)}\"",
-        f"author: \"{_escape_front_matter(resolved_author)}\"",
+        f'title: "{_escape_front_matter(resolved_title)}"',
+        f'author: "{_escape_front_matter(resolved_author)}"',
         f"generated_at: {generated_at}",
-        f"seed: \"{_escape_front_matter(seed)}\"",
-        f"project: \"{_escape_front_matter(project.name)}\"",
+        f'seed: "{_escape_front_matter(seed)}"',
+        f'project: "{_escape_front_matter(project.name)}"',
         "---",
         "",
     ]
@@ -137,11 +137,11 @@ def _build_chapter_document(
 
     front_matter_lines = [
         "---",
-        f"title: \"{_escape_front_matter(combined_title)}\"",
-        f"author: \"{_escape_front_matter(author)}\"",
+        f'title: "{_escape_front_matter(combined_title)}"',
+        f'author: "{_escape_front_matter(author)}"',
         f"chapter: {chapter_index}",
         f"total_chapters: {total_chapters}",
-        f"saga_title: \"{_escape_front_matter(resolved_saga_title)}\"",
+        f'saga_title: "{_escape_front_matter(resolved_saga_title)}"',
         f"generated_at: {generated_at}",
     ]
 
@@ -164,9 +164,7 @@ def _get_current_status(task_db_id: int) -> TaskStatus | None:
     session = SessionLocal()
     try:
         status: TaskStatus | None = (
-            session.query(Task.status)
-            .filter(Task.id == task_db_id)
-            .scalar()
+            session.query(Task.status).filter(Task.id == task_db_id).scalar()
         )
     finally:
         session.close()
@@ -206,17 +204,13 @@ def _load_full_universe_context(project_path: Path, project_id: int) -> str:
     env_dirs = os.getenv("ELKA_UNIVERSE_CONTEXT_DIRS")
     if env_dirs:
         include_dirs = [
-            entry.strip()
-            for entry in env_dirs.split(os.pathsep)
-            if entry.strip()
+            entry.strip() for entry in env_dirs.split(os.pathsep) if entry.strip()
         ] or include_dirs
 
     env_files = os.getenv("ELKA_UNIVERSE_CONTEXT_FILES")
     if env_files:
         include_files = [
-            entry.strip()
-            for entry in env_files.split(os.pathsep)
-            if entry.strip()
+            entry.strip() for entry in env_files.split(os.pathsep) if entry.strip()
         ] or include_files
 
     full_context_string = ""
@@ -235,13 +229,13 @@ def _load_full_universe_context(project_path: Path, project_id: int) -> str:
                         full_context_string += (
                             filepath.read_text(encoding="utf-8") + "\n"
                         )
-                    except Exception as exc:  # pragma: no cover - filesystem interaction
+                    except (
+                        Exception
+                    ) as exc:  # pragma: no cover - filesystem interaction
                         if isinstance(exc, Retry):
                             raise
                         logger.warning("Could not read file %s: %s", filepath, exc)
-                    full_context_string += (
-                        f"--- END FILE: {relative_path} ---\n\n"
-                    )
+                    full_context_string += f"--- END FILE: {relative_path} ---\n\n"
 
         for file_name in include_files:
             if not file_name:
@@ -331,7 +325,7 @@ def uce_process_story_task(
     )
 
     try:
-        seed_clean = seed.strip()
+        story_text = story_text.strip()
 
         project = app_context.git_manager.get_project_from_db(project_id)
         project_path = app_context.git_manager.resolve_project_path(project)
@@ -648,7 +642,6 @@ def process_story_task(
     from app.services.task_manager import TaskManager
 
     manager = TaskManager()
-    celery_task_id = self.request.id
     tokens = {"input": 0, "output": 0}
 
     if isinstance(payload, dict):
@@ -692,9 +685,14 @@ def process_story_task(
                     candidate_path = Path("stories") / candidate_path.name
             relative_story_path = candidate_path
         else:
-            fallback_title = (story_title or "Untitled Story").strip() or "Untitled Story"
+            fallback_title = (
+                story_title or "Untitled Story"
+            ).strip() or "Untitled Story"
             sanitized = sanitize_filename(fallback_title, default="story")
-            relative_story_path = Path("stories") / f"{sanitized}-{datetime.utcnow().strftime('%Y%m%d-%H%M%S')}.md"
+            relative_story_path = (
+                Path("stories")
+                / f"{sanitized}-{datetime.utcnow().strftime('%Y%m%d-%H%M%S')}.md"
+            )
 
         if not universe_context:
             universe_context = _load_full_universe_context(project_path, project_id_int)
@@ -794,10 +792,9 @@ def process_story_task(
             },
         )
 
-        commit_summary = (
-            archive_result.metadata.get("title")
-            or archive_result.metadata.get("summary", "New story")
-        )
+        commit_summary = archive_result.metadata.get(
+            "title"
+        ) or archive_result.metadata.get("summary", "New story")
         commit_message = f"Add lore entry: {commit_summary}"
 
         manager.update_task_status_by_db_id(
@@ -826,8 +823,7 @@ def process_story_task(
             TaskStatus.SUCCESS,
             progress=100,
             log_message=(
-                "Story processed, archived, and pushed to branch "
-                f"'{branch_name}'."
+                f"Story processed, archived, and pushed to branch '{branch_name}'."
             ),
             result=result_payload,
         )
@@ -843,6 +839,7 @@ def process_story_task(
         raise
     finally:
         self.update_db_task_tokens(tokens["input"], tokens["output"])
+
 
 @celery_app.task(
     bind=True,

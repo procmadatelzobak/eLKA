@@ -20,7 +20,9 @@ class AIAdapterFactory:
         key = model_key or ""
         return adapter_name, key
 
-    def get_adapter(self, adapter_name: str, model_key: str | None = None) -> BaseAIAdapter:
+    def get_adapter(
+        self, adapter_name: str, model_key: str | None = None
+    ) -> BaseAIAdapter:
         """Return an adapter by name, optionally scoped to a model key."""
 
         if adapter_name == "heuristic":
@@ -54,4 +56,3 @@ class AIAdapterFactory:
 
 
 __all__ = ["AIAdapterFactory"]
-

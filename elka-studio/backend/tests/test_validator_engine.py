@@ -3,15 +3,9 @@
 from __future__ import annotations
 
 import json
-from pathlib import Path
-import sys
 from typing import Iterable, List
 
 import pytest
-
-BACKEND_ROOT = Path(__file__).resolve().parents[1]
-if str(BACKEND_ROOT) not in sys.path:
-    sys.path.insert(0, str(BACKEND_ROOT))
 
 from app.adapters.ai.base import BaseAIAdapter
 from app.core.validator import ValidatorEngine
@@ -49,7 +43,9 @@ class DummyAdapter(BaseAIAdapter):
         ("Format validation failed due to missing section.", False),
     ],
 )
-def test_validator_engine_interprets_textual_analysis(response: str, expected: bool) -> None:
+def test_validator_engine_interprets_textual_analysis(
+    response: str, expected: bool
+) -> None:
     adapter = DummyAdapter([response, response, response])
     engine = ValidatorEngine(adapter, Config(data={}))
 

@@ -308,11 +308,13 @@ class TaskManager:
             if isinstance(stored_task.result, dict):
                 result_data = deepcopy(stored_task.result)
 
-            result_data.update({
-                "merged_into": target_branch,
-                "merge_commit": merge_commit,
-                "approval_required": False,
-            })
+            result_data.update(
+                {
+                    "merged_into": target_branch,
+                    "merge_commit": merge_commit,
+                    "approval_required": False,
+                }
+            )
             stored_task.result = result_data
             session.add(stored_task)
             session.commit()
@@ -325,7 +327,9 @@ class TaskManager:
     def _load_project(self, project_id: int) -> Project:
         session = self._session_factory()
         try:
-            project = session.query(Project).filter(Project.id == project_id).one_or_none()
+            project = (
+                session.query(Project).filter(Project.id == project_id).one_or_none()
+            )
             if project is None:
                 raise LookupError(f"Project with id {project_id} does not exist")
             session.expunge(project)
