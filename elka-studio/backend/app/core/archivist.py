@@ -65,14 +65,17 @@ class ArchivistEngine:
         story_file_path: Path,
         universe_context: str | None = None,
         task_id: int | None = None,
+        saga_theme: str | None = None,
     ) -> ArchiveResult:
         """Write the story to ``story_file_path`` and prepare metadata for committing."""
 
         summary = self.ai_adapter.summarise(story_content)
 
-        target_path = story_file_path
-        if not isinstance(target_path, Path):
-            target_path = Path(target_path)
+        target_path = Path(story_file_path)
+        saga_slug: str | None = None
+        if saga_theme:
+            saga_slug = _slugify(str(saga_theme)) or "saga"
+            target_path = Path(self.config.story_directory) / saga_slug / target_path.name
         absolute_path = (
             target_path
             if target_path.is_absolute()
@@ -86,6 +89,9 @@ class ArchivistEngine:
         except OSError as exc:
             logger.error("Failed to write story file %s: %s", absolute_path, exc)
             fallback_directory = self.config.ensure_story_directory(self.project_path)
+            if saga_slug:
+                fallback_directory = fallback_directory / saga_slug
+                fallback_directory.mkdir(parents=True, exist_ok=True)
             fallback_name = target_path.stem or "story"
             fallback_path = fallback_directory / self.config.story_filename(
                 fallback_name
@@ -116,6 +122,9 @@ class ArchivistEngine:
             "relative_path": relative_path,
             "timestamp": datetime.utcnow().isoformat(),
         }
+        if saga_slug:
+            metadata["saga_folder"] = str(Path(self.config.story_directory) / saga_slug)
+            metadata["saga_theme"] = saga_theme or ""
         for key in ("title", "author", "seed", "project"):
             if key in front_matter:
                 metadata[key] = front_matter[key]

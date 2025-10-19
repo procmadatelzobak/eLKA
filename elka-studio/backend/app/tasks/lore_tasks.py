@@ -20,7 +20,7 @@ from app.celery_app import celery_app
 from app.core.context import app_context
 from app.core.archivist import load_universe
 from app.core.schemas import TaskType
-from app.core.extractor import extract_fact_graph
+from app.core.extractor import _slugify, extract_fact_graph
 from app.core.planner import plan_changes
 from app.core.validator import validate_universe
 from app.db.session import SessionLocal
@@ -291,11 +291,23 @@ def _persist_context_token_count(project_id: int, token_count: int) -> None:
 def _accumulate_usage(
     usage: dict | None,
     accumulator: dict[str, int],
-) -> None:
+) -> dict[str, int]:
+    """Merge usage metadata into ``accumulator`` and return the increment."""
+
+    increment = {"input": 0, "output": 0}
     if not usage:
-        return
-    accumulator["input"] += int(usage.get("prompt_token_count", 0) or 0)
-    accumulator["output"] += int(usage.get("candidates_token_count", 0) or 0)
+        return increment
+
+    if "input" in usage or "output" in usage:
+        increment["input"] = int(usage.get("input", 0) or 0)
+        increment["output"] = int(usage.get("output", 0) or 0)
+    else:
+        increment["input"] = int(usage.get("prompt_token_count", 0) or 0)
+        increment["output"] = int(usage.get("candidates_token_count", 0) or 0)
+
+    accumulator["input"] += increment["input"]
+    accumulator["output"] += increment["output"]
+    return increment
 
 
 @celery_app.task(
@@ -566,7 +578,7 @@ Ensure the generated story is deeply consistent with **all** aspects of the esta
             model_key=model_key if adapter_name != "heuristic" else None,
         )
         generated_body = text.strip()
-        _accumulate_usage(usage_metadata, tokens)
+        usage_increment = _accumulate_usage(usage_metadata, tokens)
 
         resolved_title = (
             (story_title or "").strip()
@@ -595,6 +607,8 @@ Ensure the generated story is deeply consistent with **all** aspects of the esta
                     "relative_path": str(story_relative_path),
                 },
             },
+            input_tokens=usage_increment["input"],
+            output_tokens=usage_increment["output"],
         )
 
         return {
@@ -636,6 +650,7 @@ def process_story_task(
     story_title: str | None = None,
     story_author: str | None = None,
     story_file_path: str | None = None,
+    saga_theme: str | None = None,
 ) -> None:
     """Validate, archive, and commit a story to the project's repository."""
 
@@ -653,6 +668,7 @@ def process_story_task(
         story_title = story_title or payload.get("story_title")
         story_author = story_author or payload.get("story_author")
         story_file_path = story_file_path or payload.get("story_file_path")
+        saga_theme = saga_theme or payload.get("saga_theme")
     else:
         task_db_id = int(payload)
         universe_context = None
@@ -689,10 +705,12 @@ def process_story_task(
                 story_title or "Untitled Story"
             ).strip() or "Untitled Story"
             sanitized = sanitize_filename(fallback_title, default="story")
-            relative_story_path = (
-                Path("stories")
-                / f"{sanitized}-{datetime.utcnow().strftime('%Y%m%d-%H%M%S')}.md"
-            )
+            timestamped_name = f"{sanitized}-{datetime.utcnow().strftime('%Y%m%d-%H%M%S')}.md"
+            if saga_theme:
+                saga_slug = _slugify(str(saga_theme)) or "saga"
+                relative_story_path = Path("stories") / saga_slug / timestamped_name
+            else:
+                relative_story_path = Path("stories") / timestamped_name
 
         if not universe_context:
             universe_context = _load_full_universe_context(project_path, project_id_int)
@@ -756,6 +774,7 @@ def process_story_task(
             story_file_path=project_path / relative_story_path,
             universe_context=universe_context,
             task_id=task_db_id,
+            saga_theme=saga_theme,
         )
         files_to_commit: dict[str, str] = dict(archive_result.files)
 
@@ -797,25 +816,13 @@ def process_story_task(
         ) or archive_result.metadata.get("summary", "New story")
         commit_message = f"Add lore entry: {commit_summary}"
 
-        manager.update_task_status_by_db_id(
-            task_db_id,
-            TaskStatus.RUNNING,
-            progress=90,
-            log_message="Committing story to project repository...",
-        )
-
-        branch_name, staged_paths = archivist.commit_to_branch(
-            task_id=task_db_id,
-            commit_message=commit_message,
-            expected_files=files_to_commit.keys(),
-        )
-
         result_payload = {
             "files": files_to_commit,
             "metadata": archive_result.metadata,
-            "branch": branch_name,
-            "staged_paths": staged_paths,
             "commit_message": commit_message,
+            "approval_required": True,
+            "saga_theme": saga_theme,
+            "changed_paths": archive_result.changed_paths,
         }
 
         manager.update_task_status_by_db_id(
@@ -823,7 +830,8 @@ def process_story_task(
             TaskStatus.SUCCESS,
             progress=100,
             log_message=(
-                f"Story processed, archived, and pushed to branch '{branch_name}'."
+                "Story processed and awaiting approval for commit to"
+                f" {manager.config.default_branch}."
             ),
             result=result_payload,
         )
@@ -858,6 +866,7 @@ def generate_chapter_task(
     story_author: str | None = None,
     previous_chapter_content: str | None = None,
     pr_id: int | None = None,
+    saga_theme: str | None = None,
 ) -> Dict[str, Any]:
     """Generate a single saga chapter and archive it in the repository."""
 
@@ -993,10 +1002,13 @@ def generate_chapter_task(
             prompt,
             model_key=model_key if adapter_name != "heuristic" else None,
         )
-        _accumulate_usage(usage_metadata, tokens)
+        usage_increment = _accumulate_usage(usage_metadata, tokens)
         generated_body = generated_text.strip()
 
         story_directory = app_context.config.story_directory
+        if saga_theme:
+            saga_slug = _slugify(str(saga_theme)) or "saga"
+            story_directory = story_directory / saga_slug
         document, relative_path, display_title = _build_chapter_document(
             project,
             saga_title=saga_title,
@@ -1023,16 +1035,11 @@ def generate_chapter_task(
             story_file_path=project_path / relative_path,
             universe_context=full_context_string,
             task_id=task_db_id,
+            saga_theme=saga_theme,
         )
 
         files_to_commit = dict(archive_result.files)
         commit_message = f"Add saga chapter {chapter_index}: {display_title}"
-
-        branch_name, staged_paths = archivist.commit_to_branch(
-            task_id=task_db_id,
-            commit_message=commit_message,
-            expected_files=files_to_commit.keys(),
-        )
 
         result_payload: Dict[str, Any] = {
             "content": document,
@@ -1041,8 +1048,10 @@ def generate_chapter_task(
             "total_chapters": total_chapters,
             "files": files_to_commit,
             "metadata": archive_result.metadata,
-            "branch": branch_name,
-            "staged_paths": staged_paths,
+            "commit_message": commit_message,
+            "approval_required": True,
+            "saga_theme": saga_theme,
+            "changed_paths": archive_result.changed_paths,
         }
 
         manager.update_task_status(
@@ -1050,9 +1059,12 @@ def generate_chapter_task(
             TaskStatus.SUCCESS,
             progress=100,
             log_message=(
-                f"Chapter {chapter_index}/{total_chapters} archived and pushed to branch '{branch_name}'."
+                "Chapter %s/%s archived and awaiting approval for commit to %s."
+                % (chapter_index, total_chapters, manager.config.default_branch)
             ),
             result=result_payload,
+            input_tokens=usage_increment["input"],
+            output_tokens=usage_increment["output"],
         )
 
         return result_payload
@@ -1166,7 +1178,7 @@ def generate_saga_task(
             planning_prompt,
             model_key=model_key if adapter_name != "heuristic" else None,
         )
-        _accumulate_usage(usage_metadata, tokens)
+        planning_increment = _accumulate_usage(usage_metadata, tokens)
 
         outline_data = _extract_json_payload(planner_response)
         chapters_data = outline_data.get("chapters")
@@ -1190,6 +1202,8 @@ def generate_saga_task(
                 "saga_outline": outline_data,
                 "planner_raw": planner_response,
             },
+            input_tokens=planning_increment["input"],
+            output_tokens=planning_increment["output"],
         )
 
         saga_title_resolved = (
@@ -1224,6 +1238,7 @@ def generate_saga_task(
                 "story_title": saga_title_resolved,
                 "story_author": saga_author_resolved,
                 "previous_chapter_content": previous_content,
+                "saga_theme": theme,
             }
             if pr_id is not None:
                 params["pr_id"] = pr_id
@@ -1266,7 +1281,8 @@ def generate_saga_task(
                     "chapter_index": index,
                     "title": chapter_payload.get("title")
                     or str(chapter_plan.get("title", f"Chapter {index}")),
-                    "branch": chapter_payload.get("branch"),
+                    "approval_required": True,
+                    "commit_message": chapter_payload.get("commit_message"),
                 }
             )
 
@@ -1287,10 +1303,14 @@ def generate_saga_task(
             celery_task_id,
             TaskStatus.SUCCESS,
             progress=100,
-            log_message="Saga generation completed successfully.",
+            log_message=(
+                "Saga generation completed. Review chapter tasks and approve to"
+                f" publish changes to {manager.config.default_branch}."
+            ),
             result={
                 "saga_outline": outline_data,
                 "chapters": chapter_results,
+                "saga_theme": theme,
             },
         )
     except Exception as exc:  # pragma: no cover - defensive logging

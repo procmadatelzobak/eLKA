@@ -133,9 +133,13 @@ class GeminiAdapter(BaseAIAdapter):
         candidate_tokens = getattr(usage, "candidates_token_count", None) or getattr(
             usage, "candidates_tokens", 0
         )
+        input_tokens = int(prompt_tokens or 0)
+        output_tokens = int(candidate_tokens or 0)
         metadata = {
-            "prompt_token_count": int(prompt_tokens or 0),
-            "candidates_token_count": int(candidate_tokens or 0),
+            "input": input_tokens,
+            "output": output_tokens,
+            "prompt_token_count": input_tokens,
+            "candidates_token_count": output_tokens,
         }
         total = getattr(usage, "total_token_count", None) or getattr(
             usage, "total_tokens", None
@@ -143,9 +147,8 @@ class GeminiAdapter(BaseAIAdapter):
         if total is not None:
             metadata["total_tokens"] = int(total)
         else:
-            metadata["total_tokens"] = (
-                metadata["prompt_token_count"] + metadata["candidates_token_count"]
-            )
+            metadata["total_tokens"] = input_tokens + output_tokens
+        metadata["total"] = metadata["total_tokens"]
         return metadata
 
     def generate_text(

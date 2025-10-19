@@ -171,11 +171,15 @@ class HeuristicAIAdapter(BaseAIAdapter):
         import json
 
         payload = {"system": system.strip(), "user": user.strip()}
-        return json.dumps(payload), {
+        metadata = {
+            "input": 0,
+            "output": 0,
+            "total": 0,
             "prompt_token_count": 0,
             "candidates_token_count": 0,
             "total_tokens": 0,
         }
+        return json.dumps(payload), metadata
 
     def generate_text(
         self, prompt: str, model_key: str | None = None
@@ -183,11 +187,15 @@ class HeuristicAIAdapter(BaseAIAdapter):
         """Return a deterministic text response for the provided prompt."""
 
         cleaned = prompt.strip()
-        return cleaned or "", {
+        metadata = {
+            "input": 0,
+            "output": 0,
+            "total": 0,
             "prompt_token_count": 0,
             "candidates_token_count": 0,
             "total_tokens": 0,
         }
+        return cleaned or "", metadata
 
 
 def get_default_ai_adapter(config: Config) -> BaseAIAdapter:

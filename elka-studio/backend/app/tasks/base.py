@@ -61,10 +61,18 @@ class BaseTask(Task):
                 task = session.get(TaskModel, self.db_task_id)
                 if task is None:
                     return
+                safe_input = max(int(input_tokens or 0), 0)
+                safe_output = max(int(output_tokens or 0), 0)
+
                 current_input = task.total_input_tokens or 0
                 current_output = task.total_output_tokens or 0
-                task.total_input_tokens = current_input + max(input_tokens, 0)
-                task.total_output_tokens = current_output + max(output_tokens, 0)
+                task.total_input_tokens = max(current_input, safe_input)
+                task.total_output_tokens = max(current_output, safe_output)
+
+                existing_input = task.input_tokens or 0
+                existing_output = task.output_tokens or 0
+                task.input_tokens = max(existing_input, safe_input)
+                task.output_tokens = max(existing_output, safe_output)
                 session.add(task)
                 session.commit()
         except Exception as exc:  # pragma: no cover - defensive logging

@@ -238,23 +238,21 @@ class GitAdapter:
         return env
 
     def update_pr_branch(self, files: dict[str, str], commit_message: str) -> None:
-        """Write files, create a commit, and push the branch to origin."""
+        """Legacy helper retained for compatibility; no longer commits directly."""
 
         if not files:
-            raise ValueError("No files supplied for commit")
+            raise ValueError("No files supplied for update")
 
         written_paths = self.write_files(files)
         rel_paths: Iterable[str] = [
             str(path.relative_to(self.project_path)) for path in written_paths
         ]
-        self.repo.index.add(list(rel_paths))
+        if rel_paths:
+            self.repo.index.add(list(rel_paths))
 
-        if not self.repo.is_dirty(index=True, working_tree=True, untracked_files=True):
-            return
-
-        self.repo.index.commit(commit_message)
-        branch = self._current_branch()
-        self._push(branch)
+        # Commit/push handled during task approval. This method intentionally avoids
+        # mutating repository history to keep backwards compatibility for callers
+        # expecting side effects prior to approval.
 
 
 __all__ = ["GitAdapter"]
