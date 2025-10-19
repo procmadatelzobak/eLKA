@@ -1157,6 +1157,10 @@ def generate_saga_task(
     manager = TaskManager()
     celery_task_id = self.request.id
     models = manager.get_project_ai_models(project_id)
+    validator_ai, writer_ai = get_ai_adapters(
+        app_context.config,
+        project_id=project_id,
+    )
     tokens = {"input": 0, "output": 0}
 
     manager.update_task_status(
@@ -1216,10 +1220,6 @@ def generate_saga_task(
             Each chapter summary must reference previous developments to maintain continuity.
             """
         ).strip()
-
-        _, writer_ai = get_ai_adapters(
-            app_context.config, project_id=project_id
-        )
 
         planner_response, usage_metadata = writer_ai.generate_text(
             planning_prompt,
