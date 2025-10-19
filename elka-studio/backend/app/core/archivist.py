@@ -245,10 +245,18 @@ class ArchivistEngine:
 
         paths: List[str] = []
         for raw_line in status_output.splitlines():
-            line = raw_line.strip()
-            if not line:
+            if not raw_line:
                 continue
-            entry = line[3:] if len(line) > 3 else ""
+            if len(raw_line) <= 3:
+                continue
+
+            entry = raw_line[3:]
+            # ``git status --porcelain`` always separates the status and the
+            # path with at least one space. Still, we defensively strip
+            # whitespace so that we do not accidentally truncate the leading
+            # character of the path when unusual whitespace appears.
+            entry = entry.lstrip()
+
             if " -> " in entry:
                 entry = entry.split(" -> ", 1)[1]
             entry = entry.strip()

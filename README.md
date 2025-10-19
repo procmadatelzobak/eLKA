@@ -152,6 +152,11 @@ Run `bash scripts/update.sh` (or `make setup` again) to pull the latest code and
 - **Legacy SQLite schema**: Older installations might miss recently added columns (for example `tasks.parent_task_id`). The backend now inspects the database on startup and adds any missing nullable columns automatically. Restart the server after pulling new code to let the synchronisation run; no manual migration is required for default setups.
 - **ModuleNotFoundError during `make run-dev`**: The helper script now checks for critical backend modules (such as `limits`) and reinstalls `backend/requirements.txt` automatically if they are missing. If errors persist, remove `backend/venv` and run `make setup` to recreate the environment from scratch.
 - **Node dependencies missing**: Re-run `npm install` inside the `frontend/` directory or execute `make setup`.
+- **Celery saga commits fail with `imeline.md`**: Earlier builds trimmed the first
+  character of `timeline.md` when staging Git changes, causing saga generation to
+  abort with `No such file or directory`. Update to this release (or manually
+  apply commit `fix: handle whitespace when reading git status`) so the worker
+  correctly recognises new timeline files.
 
 ## Stage 3 acceptance checklist
 - **Configuration** – Verify that `GEMINI_API_KEY`, `AI_PROVIDER`, `AI_VALIDATOR_MODEL`, and `AI_WRITER_MODEL` are present either in the environment or `config.yml`; see the snippets above for reference values.
