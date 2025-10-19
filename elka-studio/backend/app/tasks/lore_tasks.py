@@ -1156,6 +1156,7 @@ def generate_saga_task(
 
     manager = TaskManager()
     celery_task_id = self.request.id
+    models = manager.get_project_ai_models(project_id)
     tokens = {"input": 0, "output": 0}
 
     manager.update_task_status(
@@ -1390,14 +1391,17 @@ def generate_saga_task(
         if isinstance(exc, Retry):
             raise
         logger.exception("generate_saga_task failed: %s", exc)
+        input_tokens = tokens.get("input") if isinstance(tokens, dict) else None
+        output_tokens = tokens.get("output") if isinstance(tokens, dict) else None
+
         manager.update_task_status(
             celery_task_id,
             TaskStatus.FAILURE,
             log_message=f"Task {task_db_id} failed: {exc}",
+            input_tokens=input_tokens,
+            output_tokens=output_tokens,
         )
         raise
-    finally:
-        self.update_db_task_tokens(tokens["input"], tokens["output"])
 
 
 __all__ = [

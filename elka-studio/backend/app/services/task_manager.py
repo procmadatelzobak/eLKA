@@ -13,7 +13,7 @@ from git.exc import GitCommandError
 
 from app.db.redis_client import get_redis_client
 from app.db.session import SessionLocal
-from app.models.project import Project
+from app.models.project import Project, Setting
 from app.models.task import Task, TaskStatus
 from app.core.context import app_context
 from app.tasks.base import dummy_task
@@ -46,6 +46,28 @@ class TaskManager:
         self._session_factory = session_factory
         self._redis_client = get_redis_client()
         self.config = app_context.config
+
+    def get_project_ai_models(self, project_id: int) -> dict[str, str]:
+        """
+        Fetches the project-specific AI model configuration from the database.
+        Falls back to global config if a specific setting is not found.
+        """
+
+        db = SessionLocal()
+        try:
+            settings = db.query(Setting).filter(Setting.project_id == project_id).all()
+            settings_map = {s.key: s.value for s in settings}
+            config = app_context.config
+
+            models = {
+                "extraction": settings_map.get("ai_model_extraction", config.validator_model()),
+                "validation": settings_map.get("ai_model_validation", config.validator_model()),
+                "generation": settings_map.get("ai_model_generation", config.writer_model()),
+                "planning": settings_map.get("ai_model_planning", config.writer_model()),
+            }
+            return models
+        finally:
+            db.close()
 
     def create_task(
         self,
