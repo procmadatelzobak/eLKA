@@ -47,6 +47,7 @@ class GitManager:
 
         if token:
             helper_path = Path(__file__).parent / "git_credential_helper.sh"
+            # Quote the helper path to handle directories containing spaces.
             command = [
                 "git",
                 "-c",
@@ -113,6 +114,7 @@ class GitManager:
 
         if token:
             helper_path = Path(__file__).parent / "git_credential_helper.sh"
+            # Quote the helper path to handle directories containing spaces.
             command = [
                 "git",
                 "-c",
