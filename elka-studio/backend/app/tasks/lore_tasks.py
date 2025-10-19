@@ -1217,6 +1217,10 @@ def generate_saga_task(
             """
         ).strip()
 
+        _, writer_ai = get_ai_adapters(
+            app_context.config, project_id=project_id
+        )
+
         planner_response, usage_metadata = writer_ai.generate_text(
             planning_prompt,
             model_key=models.get("planning"),

@@ -166,6 +166,7 @@ Run `bash scripts/update.sh` (or `make setup` again) to pull the latest code and
   abort with `No such file or directory`. Update to this release (or manually
   apply commit `fix: handle whitespace when reading git status`) so the worker
   correctly recognises new timeline files.
+- **Saga generation task fails with `NameError: name 'writer_ai' is not defined`**: Ensure the backend is up to date. The worker now initialises the writer adapter before invoking the saga planner, so rerunning the task after pulling the latest backend code resolves the error without manual patches.
 
 ## Stage 3 acceptance checklist
 - **Configuration** – Verify that `GEMINI_API_KEY`, `AI_PROVIDER`, `AI_VALIDATOR_MODEL`, and `AI_WRITER_MODEL` are present either in the environment or `config.yml`; see the snippets above for reference values.
