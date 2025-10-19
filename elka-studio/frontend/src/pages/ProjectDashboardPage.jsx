@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useParams } from 'react-router-dom';
 import TaskSocket from '../services/websocket';
-import { createTask, deleteTask, fetchProject, pauseTask, resetProject, resumeTask } from '../services/api';
+import { createTask, deleteTask, fetchProject, pauseTask, resetProject, resumeTask, syncProject } from '../services/api';
 import ProjectSettings from './ProjectSettings';
 import './ProjectDashboardPage.css';
 
@@ -43,6 +43,9 @@ const ProjectDashboardPage = () => {
   const [isResetting, setIsResetting] = useState(false);
   const [resetMessage, setResetMessage] = useState(null);
   const [resetError, setResetError] = useState(null);
+  const [isSyncing, setIsSyncing] = useState(false);
+  const [syncMessage, setSyncMessage] = useState(null);
+  const [syncError, setSyncError] = useState(null);
 
   useEffect(() => {
     const socket = new TaskSocket();
@@ -88,6 +91,9 @@ const ProjectDashboardPage = () => {
   useEffect(() => {
     setResetMessage(null);
     setResetError(null);
+    setSyncMessage(null);
+    setSyncError(null);
+    setIsSyncing(false);
   }, [projectId]);
 
   useEffect(() => {
@@ -233,6 +239,31 @@ const ProjectDashboardPage = () => {
       setResetError(detail);
     } finally {
       setIsResetting(false);
+    }
+  };
+
+  const handleSynchroniseRepository = async () => {
+    setSyncError(null);
+    setSyncMessage(null);
+    setIsSyncing(true);
+
+    try {
+      const response = await syncProject(projectId);
+      const detail = response?.data?.detail || 'Repository synchronised with the remote server.';
+      setSyncMessage(detail);
+
+      try {
+        const data = await fetchProject(projectId);
+        setProjectDetails(data || null);
+        setProjectName(typeof data?.name === 'string' ? data.name : '');
+      } catch (refreshError) {
+        console.warn('Failed to refresh project details after synchronisation.', refreshError);
+      }
+    } catch (error) {
+      const detail = error.response?.data?.detail || 'Failed to synchronise with the server.';
+      setSyncError(detail);
+    } finally {
+      setIsSyncing(false);
     }
   };
 
@@ -415,6 +446,12 @@ const ProjectDashboardPage = () => {
           )}
         </div>
         <div className="project-dashboard__actions" aria-live="polite">
+          {syncError && (
+            <p className="project-dashboard__alert project-dashboard__alert--error">{syncError}</p>
+          )}
+          {syncMessage && (
+            <p className="project-dashboard__alert project-dashboard__alert--success">{syncMessage}</p>
+          )}
           {resetError && (
             <p className="project-dashboard__alert project-dashboard__alert--error">{resetError}</p>
           )}
@@ -427,6 +464,14 @@ const ProjectDashboardPage = () => {
             onClick={openProjectSettings}
           >
             Configure AI Models
+          </button>
+          <button
+            type="button"
+            className="project-dashboard__sync-button"
+            onClick={handleSynchroniseRepository}
+            disabled={isSyncing}
+          >
+            {isSyncing ? 'Synchronising…' : 'Synchronise with Server'}
           </button>
           <button
             type="button"

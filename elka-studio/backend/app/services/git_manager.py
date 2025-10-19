@@ -17,6 +17,8 @@ from app.db.session import SessionLocal
 from app.models.project import Project
 from sqlalchemy.orm import Session
 
+from app.utils.config import Config
+
 
 class GitManager:
     """High-level helper that wraps GitPython interactions."""
@@ -25,10 +27,13 @@ class GitManager:
         self,
         projects_dir: str,
         session_factory: Callable[[], Session] = SessionLocal,
+        *,
+        config: Config | None = None,
     ):
         self.projects_dir = Path(projects_dir).expanduser()
         self.projects_dir.mkdir(parents=True, exist_ok=True)
         self._session_factory = session_factory
+        self._config = config or Config()
 
     def clone_repo(self, git_url: str, project_name: str, token: str | None) -> Path:
         """Clone a repository into the managed projects directory."""
@@ -100,6 +105,7 @@ class GitManager:
             "-C",
             str(repo_path),
             "push",
+            "--force",
             "origin",
             f"{branch_name}:{branch_name}",
         ]
@@ -114,6 +120,7 @@ class GitManager:
                 "-C",
                 str(repo_path),
                 "push",
+                "--force",
                 "origin",
                 f"{branch_name}:{branch_name}",
             ]
@@ -153,6 +160,36 @@ class GitManager:
 
         origin.pull(branch_name)
 
+    def sync_repo_hard(self, project: Project, token: str | None) -> None:
+        """Force the local repository to match the remote default branch."""
+
+        project_path = self.resolve_project_path(project)
+        try:
+            repo = git.Repo(project_path)
+        except (git.InvalidGitRepositoryError) as exc:
+            raise RuntimeError(f"{project_path} is not a git repository") from exc
+
+        try:
+            repo.remote(name="origin")
+        except ValueError as exc:
+            raise RuntimeError("No 'origin' remote configured for repository") from exc
+
+        branch = self._config.default_branch
+        env = self._build_command_env(token)
+
+        try:
+            with repo.git.custom_environment(**env):
+                repo.git.fetch("--prune", "origin")
+                try:
+                    repo.git.reset("--hard", f"origin/{branch}")
+                except GitCommandError as exc:
+                    fallback_branch = self._determine_branch(repo)
+                    if fallback_branch == branch:
+                        raise
+                    repo.git.reset("--hard", f"origin/{fallback_branch}")
+        except GitCommandError as exc:
+            raise RuntimeError(f"Failed to synchronise repository: {exc}") from exc
+
     @staticmethod
     def _normalize_project_name(project_name: str) -> str:
         normalized = project_name.strip()
@@ -167,12 +204,24 @@ class GitManager:
     @staticmethod
     def _build_git_env(token: str | None) -> dict[str, str]:
         env = os.environ.copy()
-        env["GIT_ASKPASS"] = "true"
-        env["GIT_TERMINAL_PROMPT"] = "0"
-        if token:
-            env["GIT_TOKEN"] = token
-        else:
+        env.update(GitManager._build_command_env(token))
+        if not token:
             env.pop("GIT_TOKEN", None)
+            env.pop("GIT_CONFIG_PARAMETERS", None)
+        return env
+
+    @staticmethod
+    def _build_command_env(token: str | None) -> dict[str, str]:
+        env: dict[str, str] = {
+            "GIT_ASKPASS": "true",
+            "GIT_TERMINAL_PROMPT": "0",
+        }
+        if token:
+            helper_path = Path(__file__).parent / "git_credential_helper.sh"
+            env["GIT_TOKEN"] = token
+            env["GIT_CONFIG_PARAMETERS"] = (
+                f"credential.helper=!sh {helper_path.resolve()}"
+            )
         return env
 
     @staticmethod

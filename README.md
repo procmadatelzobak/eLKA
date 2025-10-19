@@ -18,6 +18,7 @@ eLKA Studio is a full-stack application for building and managing fictional univ
 - **Extensible architecture** – Modular backend services and a modern React frontend designed for customization.
 - **Token transparency** – Track estimated universe context size and per-task token consumption to manage Gemini quotas.
 - **Per-project AI model overrides** – Configure extraction, validation, generation, and planning models for each project with automatic fallbacks to the global configuration.
+- **Hard-sync Git controls** – Keep the working tree aligned with the remote default branch through automatic pre-task synchronisation and a dedicated dashboard button.
 
 ## Quick Start
 1. Clone the repository: `git clone <repo-url> && cd elka-studio`
@@ -129,7 +130,8 @@ All changes pushed to or proposed against the `main` branch trigger the **Backen
 - Existing stories can be submitted through `POST /api/tasks/` with `type="process_story"` and `params.story_content`. The worker reuses the same validation and archival pipeline used for generated narratives.
 - The Universe Consistency Engine is available through `POST /api/tasks/story/process` with `project_id`, `story_text`, and an optional `apply` flag. Dry-run responses report the planned diff; the apply mode prepares the file payload and waits for approval before committing to the default branch.
 - Approve task results with `POST /api/tasks/{task_id}/approve`. The endpoint sets `result_approved = true`, commits the recorded files to the main branch (for example `main`), and returns the resulting SHA in `result.commit_sha`.
-- Reset a universe instantly through `POST /api/projects/{project_id}/reset`. The backend deletes lore directories (Stories/Legends/Objects) and timeline files, commits the wipe, and reinstalls the default scaffold before pushing to the remote.
+- Reset a universe instantly through `POST /api/projects/{project_id}/reset`. The backend deletes lore directories (Stories/Legends/Objects) and timeline files, commits the wipe, and reinstalls the default scaffold before force-pushing the scaffold back to the remote default branch.
+- Force-refresh a repository with `POST /api/projects/{project_id}/sync`. The endpoint performs `git fetch` followed by `git reset --hard origin/<default_branch>` (including credential helper support) and powers the dashboard's **Synchronise with Server** button. Task submissions call the same routine before enqueuing work, so saga and story jobs always start from the latest remote state and recompute token estimates against fresh lore.
 - When a project stores an encrypted Git token, Celery tasks decrypt it and use a credential helper during `git push`, preventing repeated interactive GitHub login prompts during story processing or saga generation.
 - Celery workers share a singleton application context (`backend/app/core/context.py`) that bootstraps configuration, AI adapters, Git helpers, and validation/archival services once per worker. Task payloads must include the `project_id` (and optionally `pr_id`) so the worker can retrieve the correct repository without reinitializing the FastAPI stack for every job.
 
