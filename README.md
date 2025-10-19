@@ -1,6 +1,7 @@
 # eLKA Studio
 
 eLKA Studio is a full-stack application for building and managing fictional universes. It combines a FastAPI backend, a Celery-powered task pipeline, and a React/Vite frontend to deliver a cohesive world-building experience.
+![screenshot](./.github/screen1.png)
 
 ## Features
 - **Project management dashboard** – Create, organize, and synchronize projects across local and remote Git repositories.
