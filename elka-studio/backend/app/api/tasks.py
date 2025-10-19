@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 import logging
-from typing import Any, Dict, List
+import re
+from typing import Any, Dict, List, Mapping
 
 from fastapi import APIRouter, Depends, HTTPException, Response, status
 from pydantic import BaseModel, Field
@@ -18,6 +19,43 @@ router = APIRouter(prefix="/tasks", tags=["tasks"])
 logger = logging.getLogger(__name__)
 
 task_manager = TaskManager()
+
+
+_CAMEL_CASE_PATTERN = re.compile(r"(?<!^)(?=[A-Z])")
+
+
+def _to_snake_case(value: str) -> str:
+    """Convert ``value`` from camelCase/PascalCase to snake_case."""
+
+    return _CAMEL_CASE_PATTERN.sub("_", value).lower()
+
+
+def _normalize_params(params: Mapping[str, Any]) -> Dict[str, Any]:
+    """Normalize task parameter keys to snake_case.
+
+    Celery tasks consistently expect snake_case keyword arguments. Frontend
+    payloads might still submit camelCase keys (for example ``storyTitle``),
+    which would otherwise propagate to ``apply_async`` and raise
+    ``TypeError`` because the worker signature defines ``story_title``. This
+    helper rewrites such keys while keeping explicitly provided snake_case
+    entries authoritative.
+    """
+
+    normalized: Dict[str, Any] = {}
+    for key, value in params.items():
+        if isinstance(key, str):
+            snake_key = _to_snake_case(key)
+        else:  # pragma: no cover - defensive, keys are expected to be strings
+            snake_key = str(key)
+
+        if snake_key in normalized and snake_key != key:
+            # Prefer the already-normalized value to avoid overriding
+            # intentional snake_case entries with legacy camelCase duplicates.
+            continue
+
+        normalized[snake_key] = value
+
+    return normalized
 
 
 class TaskCreateRequest(BaseModel):
@@ -69,7 +107,7 @@ def list_tasks(session: Session = Depends(get_session)) -> List[dict]:
 def create_task(payload: TaskCreateRequest) -> dict:
     """Create a new task and dispatch it to the background queue."""
 
-    params = dict(payload.params)
+    params = _normalize_params(payload.params)
     if payload.pr_id is not None:
         params.setdefault("pr_id", payload.pr_id)
     if payload.seed is not None:
