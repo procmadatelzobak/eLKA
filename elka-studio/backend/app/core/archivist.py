@@ -73,15 +73,20 @@ class ArchivistEngine:
         task_id: int | None = None,
         saga_theme: str | None = None,
     ) -> ArchiveResult:
-        """Write the story to ``story_file_path`` and prepare metadata for committing."""
+        """Write the story to ``story_file_path`` and prepare metadata for committing.
+
+        Saga themes are slugified before creating directories to keep paths portable.
+        """
 
         summary = self.ai_adapter.summarise(story_content)
 
         target_path = Path(story_file_path)
         saga_slug: str | None = None
+        saga_directory: Path | None = None
         if saga_theme:
-            saga_slug = _slugify(str(saga_theme)) or "saga"
-            target_path = Path(self.config.story_directory) / saga_slug / target_path.name
+            saga_slug = self._slugify(str(saga_theme)) or "saga"
+            saga_directory = self.config.story_directory / saga_slug
+            target_path = saga_directory / target_path.name
         absolute_path = (
             target_path
             if target_path.is_absolute()
@@ -129,7 +134,7 @@ class ArchivistEngine:
             "timestamp": datetime.utcnow().isoformat(),
         }
         if saga_slug:
-            metadata["saga_folder"] = str(Path(self.config.story_directory) / saga_slug)
+            metadata["saga_folder"] = str(saga_directory)
             metadata["saga_theme"] = saga_theme or ""
         for key in ("title", "author", "seed", "project"):
             if key in front_matter:
