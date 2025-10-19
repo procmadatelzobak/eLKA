@@ -56,4 +56,12 @@ export const updateAiSettings = (settings) => getApiClient().post('/settings/ai'
 
 export const resetProject = (projectId) => getApiClient().post(`/projects/${projectId}/reset`);
 
+export const fetchProjectAiModels = async (projectId) => {
+  const response = await getApiClient().get(`/projects/${projectId}/settings/ai-models`);
+  return response.data;
+};
+
+export const updateProjectAiModels = (projectId, payload) =>
+  getApiClient().put(`/projects/${projectId}/settings/ai-models`, payload);
+
 export default getApiClient;

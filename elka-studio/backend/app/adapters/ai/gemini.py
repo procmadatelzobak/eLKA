@@ -230,13 +230,19 @@ class GeminiAdapter(BaseAIAdapter):
         ).strip()
         return summary or "Summary unavailable"
 
-    def generate_markdown(self, instruction: str, context: str | None = None) -> str:
+    def generate_markdown(
+        self,
+        instruction: str,
+        context: str | None = None,
+        *,
+        model_key: str | None = None,
+    ) -> str:
         """Generate Markdown content using the Gemini model."""
 
         contents = (
             instruction if not context else f"{instruction}\n\nCONTEXT:\n{context}"
         )
-        text, _ = self.generate_text(contents)
+        text, _ = self.generate_text(contents, model_key=model_key)
         return text
 
     def generate_json(

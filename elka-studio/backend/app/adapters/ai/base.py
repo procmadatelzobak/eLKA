@@ -7,6 +7,10 @@ from dataclasses import dataclass
 from typing import Any, Dict, Optional, Tuple
 
 from app.utils.config import Config
+from app.services.project_settings import (
+    build_default_ai_settings,
+    load_project_ai_models,
+)
 
 
 class BaseAIAdapter(ABC):
@@ -31,7 +35,13 @@ class BaseAIAdapter(ABC):
         raise NotImplementedError
 
     # Optional helpers -------------------------------------------------
-    def generate_markdown(self, instruction: str, context: str | None = None) -> str:
+    def generate_markdown(
+        self,
+        instruction: str,
+        context: str | None = None,
+        *,
+        model_key: str | None = None,
+    ) -> str:
         """Return Markdown content generated from the provided instruction."""
 
         raise NotImplementedError
@@ -142,7 +152,13 @@ class HeuristicAIAdapter(BaseAIAdapter):
             summary += "…"
         return summary
 
-    def generate_markdown(self, instruction: str, context: str | None = None) -> str:
+    def generate_markdown(
+        self,
+        instruction: str,
+        context: str | None = None,
+        *,
+        model_key: str | None = None,
+    ) -> str:
         """Deterministically combine instruction and context into Markdown."""
 
         context_value = (context or "").strip()
@@ -204,15 +220,22 @@ def get_default_ai_adapter(config: Config) -> BaseAIAdapter:
     return HeuristicAIAdapter(config=config)
 
 
-def get_ai_adapters(config: Config) -> tuple[BaseAIAdapter, BaseAIAdapter]:
+def get_ai_adapters(
+    config: Config, project_id: int | None = None
+) -> tuple[BaseAIAdapter, BaseAIAdapter]:
     """Return validator and writer adapters based on configuration."""
+
+    if project_id is not None:
+        models = load_project_ai_models(config, project_id)
+    else:
+        models = build_default_ai_settings(config)
 
     provider = config.ai_provider()
     if provider == "gemini" and config.get_gemini_api_key():
         from app.adapters.ai.gemini import GeminiAdapter
 
-        validator = GeminiAdapter(config=config, model=config.validator_model())
-        writer = GeminiAdapter(config=config, model=config.writer_model())
+        validator = GeminiAdapter(config=config, model=models["validation"])
+        writer = GeminiAdapter(config=config, model=models["generation"])
         return validator, writer
 
     heuristic = HeuristicAIAdapter(config=config)

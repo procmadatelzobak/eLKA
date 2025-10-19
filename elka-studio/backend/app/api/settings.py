@@ -6,15 +6,25 @@ import logging
 from pathlib import Path
 from typing import Any, Dict
 
-from fastapi import APIRouter, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel
 from ruamel.yaml import YAML
+from sqlalchemy.orm import Session
 
+from app.core.context import app_context
+from app.db.session import get_session
+from app.models.project import Project, Setting
+from app.services.project_settings import (
+    MODEL_SETTING_KEYS,
+    fetch_project_ai_settings,
+    resolve_project_ai_models,
+)
 from app.utils.config import Config, find_config_file
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/settings", tags=["settings"])
+project_settings_router = APIRouter(prefix="/projects", tags=["project-settings"])
 
 yaml = YAML()
 yaml.preserve_quotes = True
@@ -25,6 +35,34 @@ class AiSettingsUpdate(BaseModel):
     """Payload for updating AI settings via the API."""
 
     default_adapter: str
+
+
+class ProjectAIModelUpdate(BaseModel):
+    """Payload for updating per-project AI model overrides."""
+
+    extraction: str | None = None
+    validation: str | None = None
+    generation: str | None = None
+    planning: str | None = None
+
+    class Config:
+        extra = "forbid"
+
+
+def _ensure_project(session: Session, project_id: int) -> Project:
+    project = session.get(Project, project_id)
+    if project is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Project not found",
+        )
+    return project
+
+
+def _serialize_project_ai_settings(session: Session, project_id: int) -> dict[str, str]:
+    overrides = fetch_project_ai_settings(session, project_id)
+    resolved = resolve_project_ai_models(app_context.config, overrides)
+    return resolved
 
 
 def _resolve_config_path() -> Path | None:
@@ -95,3 +133,67 @@ def update_ai_settings(payload: AiSettingsUpdate) -> Dict[str, str]:
         "default_adapter": normalised,
         "message": "Adapter updated. Restart the backend to apply changes.",
     }
+
+
+@project_settings_router.get(
+    "/{project_id}/settings/ai-models",
+    summary="Retrieve AI model overrides for a project",
+)
+def get_project_ai_models(
+    project_id: int, session: Session = Depends(get_session)
+) -> dict[str, str]:
+    """Return the effective AI model mapping for the requested project."""
+
+    _ensure_project(session, project_id)
+    return _serialize_project_ai_settings(session, project_id)
+
+
+@project_settings_router.put(
+    "/{project_id}/settings/ai-models",
+    summary="Update AI model overrides for a project",
+)
+def update_project_ai_models(
+    project_id: int,
+    payload: ProjectAIModelUpdate,
+    session: Session = Depends(get_session),
+) -> dict[str, str]:
+    """Persist project-level AI model overrides and return the updated mapping."""
+
+    _ensure_project(session, project_id)
+    dump_method = getattr(payload, "model_dump", None)
+    updates = (
+        dump_method(exclude_unset=True)
+        if callable(dump_method)
+        else payload.dict(exclude_unset=True)
+    )
+
+    if updates:
+        existing = {
+            setting.key: setting
+            for setting in session.query(Setting)
+            .filter(
+                Setting.project_id == project_id,
+                Setting.key.in_(MODEL_SETTING_KEYS.values()),
+            )
+            .all()
+        }
+
+        for field, value in updates.items():
+            setting_key = MODEL_SETTING_KEYS[field]
+            cleaned = (value or "").strip() if value is not None else ""
+            current = existing.get(setting_key)
+            if cleaned:
+                if current is None:
+                    current = Setting(
+                        project_id=project_id, key=setting_key, value=cleaned
+                    )
+                    session.add(current)
+                else:
+                    current.value = cleaned
+            else:
+                if current is not None:
+                    session.delete(current)
+
+        session.commit()
+
+    return _serialize_project_ai_settings(session, project_id)

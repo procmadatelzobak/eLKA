@@ -61,7 +61,13 @@ API_PREFIX = "/api"
 
 def include_routers(application: FastAPI) -> None:
     """Attach all API routers to the provided application instance."""
-    api_routers: List = [projects.router, root.router, tasks.router, settings.router]
+    api_routers: List = [
+        projects.router,
+        root.router,
+        tasks.router,
+        settings.router,
+        settings.project_settings_router,
+    ]
     for router in api_routers:
         application.include_router(router, prefix=API_PREFIX)
 

@@ -75,11 +75,19 @@ class AppContext:
         token = self._resolve_git_token(project)
         return GitAdapter(project_path=project_path, config=self.config, token=token)
 
-    def create_archivist(self, git_adapter: GitAdapter) -> ArchivistEngine:
+    def create_archivist(
+        self,
+        git_adapter: GitAdapter,
+        *,
+        ai_adapter: BaseAIAdapter | None = None,
+        model_overrides: dict[str, str] | None = None,
+    ) -> ArchivistEngine:
+        adapter = ai_adapter or self.writer_ai
         return ArchivistEngine(
             git_adapter=git_adapter,
-            ai_adapter=self.writer_ai,
+            ai_adapter=adapter,
             config=self.config,
+            model_overrides=model_overrides,
         )
 
     def _resolve_git_token(self, project: Project) -> str | None:
