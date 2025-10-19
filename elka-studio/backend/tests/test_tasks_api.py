@@ -83,6 +83,8 @@ def test_process_story_response_masks_tokens(monkeypatch: pytest.MonkeyPatch) ->
 
     monkeypatch.setenv("GEMINI_API_KEY", "super-secret-token")
 
+    monkeypatch.setattr(tasks, "_synchronise_project", lambda *args, **kwargs: None)
+
     class DummyTaskRecord:
         id = 42
         celery_task_id = "abc123"
@@ -100,5 +102,5 @@ def test_process_story_response_masks_tokens(monkeypatch: pytest.MonkeyPatch) ->
     )
 
     payload = tasks.ProcessStoryRequest(project_id=1, story_text="Legend", apply=False)
-    response = tasks.process_story(payload)
+    response = tasks.process_story(payload, session=None)
     assert response.dict() == {"task_id": 42, "celery_task_id": "abc123"}

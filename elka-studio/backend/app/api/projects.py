@@ -212,7 +212,8 @@ def create_project(
 
 @router.post("/{project_id}/sync", summary="Synchronise a project's repository")
 def sync_project(project_id: int, session: Session = Depends(get_session)) -> dict:
-    """Pull the latest changes for the specified project repository."""
+    """Force the local repository to match the remote default branch."""
+
     project = session.get(Project, project_id)
     if project is None:
         raise HTTPException(
@@ -224,18 +225,46 @@ def sync_project(project_id: int, session: Session = Depends(get_session)) -> di
             detail="Project has no local repository path",
         )
 
-    local_path = Path(project.local_path)
-    git_manager = GitManager(str(local_path.parent))
+    token: str | None = None
+    if project.git_token:
+        try:
+            secret_key = get_secret_key()
+        except RuntimeError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=str(exc),
+            ) from exc
+        try:
+            token = decrypt(project.git_token, secret_key)
+        except Exception as exc:  # pragma: no cover - defensive branch
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"Failed to decrypt Git token: {exc}",
+            ) from exc
+
+    projects_dir = _resolve_projects_dir()
+    git_manager = GitManager(str(projects_dir))
 
     try:
-        git_manager.pull_updates(local_path.name)
+        git_manager.sync_repo_hard(project, token)
+    except FileNotFoundError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=str(exc),
+        ) from exc
+    except RuntimeError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(exc),
+        ) from exc
     except Exception as exc:  # pragma: no cover - network dependent
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to synchronise repository: {exc}",
         ) from exc
 
-    return project.to_dict()
+    session.refresh(project)
+    return {"detail": "Repository synchronised successfully."}
 
 
 @router.post("/{project_id}/reset", summary="Reset a project to the scaffold state")

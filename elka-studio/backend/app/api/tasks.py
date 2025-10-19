@@ -11,8 +11,11 @@ from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from ..db.session import get_session
+from ..models.project import Project
 from ..models.task import Task, TaskStatus
+from ..utils.security import decrypt, get_secret_key
 from ..services.task_manager import TaskManager
+from ..core.context import app_context
 
 router = APIRouter(prefix="/tasks", tags=["tasks"])
 
@@ -56,6 +59,55 @@ def _normalize_params(params: Mapping[str, Any]) -> Dict[str, Any]:
         normalized[snake_key] = value
 
     return normalized
+
+
+def _synchronise_project(
+    session: Session, project_id: int
+) -> Project:
+    """Ensure the project's repository matches the remote default branch."""
+
+    project = session.get(Project, project_id)
+    if project is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Project not found"
+        )
+
+    token: str | None = None
+    if project.git_token:
+        try:
+            secret_key = get_secret_key()
+        except RuntimeError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=str(exc),
+            ) from exc
+        try:
+            token = decrypt(project.git_token, secret_key)
+        except Exception as exc:  # pragma: no cover - defensive branch
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"Failed to decrypt Git token: {exc}",
+            ) from exc
+
+    try:
+        app_context.git_manager.sync_repo_hard(project, token)
+    except FileNotFoundError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=str(exc),
+        ) from exc
+    except RuntimeError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(exc),
+        ) from exc
+    except Exception as exc:  # pragma: no cover - network dependent
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to synchronise repository: {exc}",
+        ) from exc
+
+    return project
 
 
 class TaskCreateRequest(BaseModel):
@@ -104,8 +156,12 @@ def list_tasks(session: Session = Depends(get_session)) -> List[dict]:
 
 
 @router.post("/", summary="Create task", status_code=status.HTTP_201_CREATED)
-def create_task(payload: TaskCreateRequest) -> dict:
+def create_task(
+    payload: TaskCreateRequest, session: Session = Depends(get_session)
+) -> dict:
     """Create a new task and dispatch it to the background queue."""
+
+    _synchronise_project(session, payload.project_id)
 
     params = _normalize_params(payload.params)
     if payload.pr_id is not None:
@@ -312,13 +368,17 @@ class ProcessStoryResponse(BaseModel):
         "Any validation errors are surfaced through the task log and stored notes."
     ),
 )
-def process_story(payload: ProcessStoryRequest) -> ProcessStoryResponse:
+def process_story(
+    payload: ProcessStoryRequest, session: Session = Depends(get_session)
+) -> ProcessStoryResponse:
     story_text = payload.story_text.strip()
     if not story_text:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="story_text must be a non-empty string",
         )
+
+    _synchronise_project(session, payload.project_id)
 
     params = {"story_text": story_text, "apply": payload.apply}
     task = task_manager.create_task(payload.project_id, "uce_process_story", params)
