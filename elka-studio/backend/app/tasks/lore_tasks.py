@@ -18,16 +18,17 @@ from celery.utils.log import get_task_logger
 from app.adapters.ai.base import get_ai_adapters
 from app.celery_app import celery_app
 from app.core.context import app_context
-from app.core.archivist import load_universe
+from app.core.archivist import ArchivistEngine, load_universe
 from app.core.schemas import TaskType
 from app.core.extractor import _slugify, extract_fact_graph
 from app.core.planner import plan_changes
-from app.core.validator import validate_universe
+from app.core.validator import ValidatorEngine, validate_universe
 from app.db.session import SessionLocal
 from app.models.project import Project
 from app.models.task import Task, TaskStatus
 from app.tasks.base import BaseTask
 from app.utils.filesystem import sanitize_filename
+from app.services.project_settings import load_project_ai_models
 
 logger = get_task_logger(__name__)
 
@@ -348,8 +349,15 @@ def uce_process_story_task(
             log_message=f"Loaded project '{project.name}'. Extracting facts...",
         )
 
-        validator_ai, writer_ai = get_ai_adapters(app_context.config)
-        incoming_graph = extract_fact_graph(story_text, validator_ai)
+        models = load_project_ai_models(app_context.config, project_id)
+        validator_ai, writer_ai = get_ai_adapters(
+            app_context.config, project_id=project_id
+        )
+        incoming_graph = extract_fact_graph(
+            story_text,
+            writer_ai,
+            model_key=models.get("extraction"),
+        )
         current_graph = load_universe(project_path)
         issues = validate_universe(current_graph, incoming_graph, validator_ai)
 
@@ -370,7 +378,13 @@ def uce_process_story_task(
             )
             return
 
-        changeset = plan_changes(current_graph, incoming_graph, project_path, writer_ai)
+        changeset = plan_changes(
+            current_graph,
+            incoming_graph,
+            project_path,
+            writer_ai,
+            model_key=models.get("planning"),
+        )
         if not changeset.files:
             manager.update_task_status(
                 celery_task_id,
@@ -487,6 +501,10 @@ def generate_story_from_seed_task(
 
         project = app_context.git_manager.get_project_from_db(project_id)
         project_path = Path(app_context.git_manager.resolve_project_path(project))
+        models = load_project_ai_models(app_context.config, project_id)
+        validator_ai, writer_ai = get_ai_adapters(
+            app_context.config, project_id=project_id
+        )
 
         manager.update_task_status(
             celery_task_id,
@@ -506,26 +524,7 @@ def generate_story_from_seed_task(
                 word_count,
             )
 
-        try:
-            model_key = manager.config.get_model_key_for_task("seed_generation")
-            model_name = manager.config.get_model_name_for_task("seed_generation")
-            logger.info("Using specific model configured for 'seed_generation'.")
-        except KeyError:
-            logger.info(
-                "No specific model for 'seed_generation', using default 'generation' model."
-            )
-            model_key = manager.config.get_model_key_for_task("generation")
-            model_name = manager.config.get_model_name_for_task("generation")
-        adapter_name = (
-            "heuristic"
-            if model_key == "heuristic"
-            else manager.config.get_default_adapter()
-        )
-        ai_adapter = manager.ai_adapter_factory.get_adapter(
-            adapter_name, model_key=model_key
-        )
-
-        context_tokens = ai_adapter.count_tokens(full_context_string)
+        context_tokens = writer_ai.count_tokens(full_context_string)
         _persist_context_token_count(project_id, context_tokens)
 
         manager.update_task_status(
@@ -533,7 +532,8 @@ def generate_story_from_seed_task(
             TaskStatus.RUNNING,
             progress=35,
             log_message=(
-                f"Using AI adapter '{adapter_name}' (model key '{model_key}', model '{model_name}')."
+                "Using writer model '%s' for story generation."
+                % models.get("generation")
             ),
         )
 
@@ -573,9 +573,9 @@ Ensure the generated story is deeply consistent with **all** aspects of the esta
         )
 
         generated_body = ""
-        text, usage_metadata = ai_adapter.generate_text(
+        text, usage_metadata = writer_ai.generate_text(
             prompt,
-            model_key=model_key if adapter_name != "heuristic" else None,
+            model_key=models.get("generation"),
         )
         generated_body = text.strip()
         usage_increment = _accumulate_usage(usage_metadata, tokens)
@@ -714,11 +714,7 @@ def process_story_task(
 
         if not universe_context:
             universe_context = _load_full_universe_context(project_path, project_id_int)
-            ai_for_context = manager.ai_adapter_factory.get_adapter(
-                manager.config.get_default_adapter(),
-                model_key=manager.config.get_model_key_for_task("generation"),
-            )
-            context_tokens = ai_for_context.count_tokens(universe_context)
+            context_tokens = writer_ai.count_tokens(universe_context)
             _persist_context_token_count(project_id_int, context_tokens)
 
         manager.update_task_status_by_db_id(
@@ -735,8 +731,10 @@ def process_story_task(
             log_message="Validating story content...",
         )
 
-        validator = app_context.validator
-        validation_report = validator.validate(
+        validator_engine = ValidatorEngine(
+            ai_adapter=validator_ai, config=app_context.config
+        )
+        validation_report = validator_engine.validate(
             story_content,
             universe_context=universe_context,
         )
@@ -760,7 +758,12 @@ def process_story_task(
             return
 
         git_adapter = app_context.create_git_adapter(project)
-        archivist = app_context.create_archivist(git_adapter)
+        archivist = ArchivistEngine(
+            git_adapter=git_adapter,
+            ai_adapter=writer_ai,
+            config=app_context.config,
+            model_overrides=models,
+        )
 
         manager.update_task_status_by_db_id(
             task_db_id,
@@ -888,6 +891,10 @@ def generate_chapter_task(
 
         project = app_context.git_manager.get_project_from_db(project_id)
         project_path = Path(app_context.git_manager.resolve_project_path(project))
+        models = load_project_ai_models(app_context.config, project_id)
+        _, writer_ai = get_ai_adapters(
+            app_context.config, project_id=project_id
+        )
 
         manager.update_task_status(
             celery_task_id,
@@ -898,30 +905,13 @@ def generate_chapter_task(
 
         full_context_string = _load_full_universe_context(project_path, project_id)
 
-        try:
-            model_key = manager.config.get_model_key_for_task("generate_chapter")
-            model_name = manager.config.get_model_name_for_task("generate_chapter")
-        except KeyError:
-            model_key = manager.config.get_model_key_for_task("planning")
-            model_name = manager.config.get_model_name_for_task("planning")
-
-        adapter_name = (
-            "heuristic"
-            if model_key == "heuristic"
-            else manager.config.get_default_adapter()
-        )
-        ai_adapter = manager.ai_adapter_factory.get_adapter(
-            adapter_name,
-            model_key=model_key if adapter_name != "heuristic" else None,
-        )
-
         manager.update_task_status(
             celery_task_id,
             TaskStatus.RUNNING,
             progress=30,
             log_message=(
-                "Using AI adapter '%s' (model key '%s', model '%s') for chapter "
-                "generation." % (adapter_name, model_key, model_name)
+                "Using writer model '%s' for chapter generation."
+                % models.get("generation")
             ),
         )
 
@@ -998,9 +988,9 @@ def generate_chapter_task(
             log_message="Requesting chapter content from AI adapter...",
         )
 
-        generated_text, usage_metadata = ai_adapter.generate_text(
+        generated_text, usage_metadata = writer_ai.generate_text(
             prompt,
-            model_key=model_key if adapter_name != "heuristic" else None,
+            model_key=models.get("generation"),
         )
         usage_increment = _accumulate_usage(usage_metadata, tokens)
         generated_body = generated_text.strip()
@@ -1021,7 +1011,12 @@ def generate_chapter_task(
         )
 
         git_adapter = app_context.create_git_adapter(project)
-        archivist = app_context.create_archivist(git_adapter)
+        archivist = ArchivistEngine(
+            git_adapter=git_adapter,
+            ai_adapter=writer_ai,
+            config=app_context.config,
+            model_overrides=models,
+        )
 
         manager.update_task_status(
             celery_task_id,
@@ -1126,25 +1121,13 @@ def generate_saga_task(
 
         full_context_string = _load_full_universe_context(project_path, project_id)
 
-        model_key = manager.config.get_model_key_for_task("planning")
-        model_name = manager.config.get_model_name_for_task("planning")
-        adapter_name = (
-            "heuristic"
-            if model_key == "heuristic"
-            else manager.config.get_default_adapter()
-        )
-        ai_adapter = manager.ai_adapter_factory.get_adapter(
-            adapter_name,
-            model_key=model_key if adapter_name != "heuristic" else None,
-        )
-
         manager.update_task_status(
             celery_task_id,
             TaskStatus.RUNNING,
             progress=25,
             log_message=(
-                "Generating saga outline with adapter '%s' (model key '%s', model '%s')."
-                % (adapter_name, model_key, model_name)
+                "Generating saga outline with planning model '%s'."
+                % models.get("planning")
             ),
         )
 
@@ -1174,9 +1157,9 @@ def generate_saga_task(
             """
         ).strip()
 
-        planner_response, usage_metadata = ai_adapter.generate_text(
+        planner_response, usage_metadata = writer_ai.generate_text(
             planning_prompt,
-            model_key=model_key if adapter_name != "heuristic" else None,
+            model_key=models.get("planning"),
         )
         planning_increment = _accumulate_usage(usage_metadata, tokens)
 

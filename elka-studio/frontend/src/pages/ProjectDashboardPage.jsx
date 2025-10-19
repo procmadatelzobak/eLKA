@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { useParams } from 'react-router-dom';
 import TaskSocket from '../services/websocket';
 import { createTask, deleteTask, fetchProject, pauseTask, resetProject, resumeTask } from '../services/api';
+import ProjectSettings from './ProjectSettings';
 import './ProjectDashboardPage.css';
 
 const statusColors = {
@@ -253,6 +254,14 @@ const ProjectDashboardPage = () => {
     });
   };
 
+  const openProjectSettings = () => {
+    setModalContent({
+      type: 'project-settings',
+      title: 'Project AI Settings',
+      data: { projectId },
+    });
+  };
+
   const openFilesModal = (task) => {
     const files = task?.result?.files;
     if (!files || Object.keys(files).length === 0) {
@@ -412,6 +421,13 @@ const ProjectDashboardPage = () => {
           {resetMessage && (
             <p className="project-dashboard__alert project-dashboard__alert--success">{resetMessage}</p>
           )}
+          <button
+            type="button"
+            className="project-dashboard__settings-button"
+            onClick={openProjectSettings}
+          >
+            Configure AI Models
+          </button>
           <button
             type="button"
             className="project-dashboard__reset-button"
@@ -776,6 +792,13 @@ const ProjectDashboardPage = () => {
                     ))
                   )}
                 </div>
+              )}
+
+              {modalContent.type === 'project-settings' && (
+                <ProjectSettings
+                  projectId={modalContent.data?.projectId}
+                  onClose={closeModal}
+                />
               )}
             </div>
 

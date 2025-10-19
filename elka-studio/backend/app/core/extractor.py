@@ -91,6 +91,8 @@ def extract_fact_graph(
     story: str,
     ai: BaseAIAdapter,
     context: str | None = None,
+    *,
+    model_key: str | None = None,
 ) -> FactGraph:
     """Use the AI adapter to convert a story into a :class:`FactGraph`."""
 
@@ -108,7 +110,14 @@ def extract_fact_graph(
                 "Respond with compact JSON matching the requested schema."
             )
             try:
-                result, _ = ai.generate_json(system_prompt, prompt)  # type: ignore[arg-type]
+                try:
+                    result, _ = ai.generate_json(
+                        system_prompt, prompt, model_key=model_key
+                    )  # type: ignore[arg-type]
+                except TypeError:
+                    result, _ = ai.generate_json(  # type: ignore[arg-type]
+                        system_prompt, prompt
+                    )
             except Exception as exc:  # pragma: no cover - adapter specific
                 last_error = exc
                 continue
@@ -172,10 +181,14 @@ def extract_story_entities(
     story: str,
     ai: BaseAIAdapter,
     universe_context: str | None = None,
+    *,
+    model_key: str | None = None,
 ) -> ExtractedData:
     """Extract structured entity data suitable for archival."""
 
-    fact_graph = extract_fact_graph(story, ai, context=universe_context)
+    fact_graph = extract_fact_graph(
+        story, ai, context=universe_context, model_key=model_key
+    )
     data = ExtractedData()
 
     for entity in fact_graph.entities:

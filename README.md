@@ -17,6 +17,7 @@ eLKA Studio is a full-stack application for building and managing fictional univ
 - **Universe Consistency Engine** – Extract facts, verify canon conflicts, and propose Git-ready updates.
 - **Extensible architecture** – Modular backend services and a modern React frontend designed for customization.
 - **Token transparency** – Track estimated universe context size and per-task token consumption to manage Gemini quotas.
+- **Per-project AI model overrides** – Configure extraction, validation, generation, and planning models for each project with automatic fallbacks to the global configuration.
 
 ## Quick Start
 1. Clone the repository: `git clone <repo-url> && cd elka-studio`

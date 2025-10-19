@@ -51,12 +51,18 @@ class ArchivistEngine:
     """Persist validated stories into the lore repository."""
 
     def __init__(
-        self, git_adapter: GitAdapter, ai_adapter: BaseAIAdapter, config: Config
+        self,
+        git_adapter: GitAdapter,
+        ai_adapter: BaseAIAdapter,
+        config: Config,
+        *,
+        model_overrides: dict[str, str] | None = None,
     ) -> None:
         self.git_adapter = git_adapter
         self.ai_adapter = ai_adapter
         self.config = config
         self.project_path = self.git_adapter.project_path
+        self._model_overrides = model_overrides or {}
 
     def archive(
         self,
@@ -139,6 +145,7 @@ class ArchivistEngine:
                 story_content,
                 self.ai_adapter,
                 universe_context=universe_context,
+                model_key=self._model_overrides.get("extraction"),
             )
         except Exception as exc:  # pragma: no cover - defensive logging
             logger.error("Failed to extract entities from story: %s", exc)
