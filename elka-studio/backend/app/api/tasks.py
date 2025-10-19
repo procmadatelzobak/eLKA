@@ -25,9 +25,15 @@ class TaskCreateRequest(BaseModel):
 
     project_id: int
     task_type: str = Field(..., alias="type")
-    params: Dict[str, Any] = Field(default_factory=dict, description="Additional task parameters")
-    seed: str | None = Field(default=None, description="Story seed for generation tasks")
-    theme: str | None = Field(default=None, description="Saga theme for orchestration tasks")
+    params: Dict[str, Any] = Field(
+        default_factory=dict, description="Additional task parameters"
+    )
+    seed: str | None = Field(
+        default=None, description="Story seed for generation tasks"
+    )
+    theme: str | None = Field(
+        default=None, description="Saga theme for orchestration tasks"
+    )
     chapters: int | None = Field(
         default=None,
         ge=1,
@@ -146,16 +152,22 @@ def create_task(payload: TaskCreateRequest) -> dict:
     try:
         task = task_manager.create_task(payload.project_id, payload.task_type, params)
     except ValueError as exc:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)
+        ) from exc
 
     return task.to_dict()
 
 
-@router.delete("/{task_id}", summary="Delete task", status_code=status.HTTP_204_NO_CONTENT)
+@router.delete(
+    "/{task_id}", summary="Delete task", status_code=status.HTTP_204_NO_CONTENT
+)
 def delete_task(task_id: int, session: Session = Depends(get_session)) -> Response:
     task = session.query(Task).filter(Task.id == task_id).one_or_none()
     if task is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Task not found")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Task not found"
+        )
     project_id = task.project_id
     try:
         session.delete(task)
@@ -174,7 +186,9 @@ def delete_task(task_id: int, session: Session = Depends(get_session)) -> Respon
 def _update_task_status(session: Session, task_id: int, status_value: str) -> Task:
     task = session.query(Task).filter(Task.id == task_id).one_or_none()
     if task is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Task not found")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Task not found"
+        )
     task.status = status_value
     session.add(task)
     session.commit()
@@ -200,11 +214,17 @@ def approve_task(task_id: int, session: Session = Depends(get_session)) -> dict:
     try:
         task = task_manager.approve_task(task_id, session=session)
     except LookupError as exc:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)
+        ) from exc
     except ValueError as exc:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)
+        ) from exc
     except RuntimeError as exc:
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT, detail=str(exc)
+        ) from exc
     except Exception as exc:  # pragma: no cover - defensive branch
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -237,7 +257,9 @@ class ProcessStoryResponse(BaseModel):
     """Response metadata for a scheduled Universe Consistency Engine run."""
 
     task_id: int = Field(..., description="Identifier of the persisted task record")
-    celery_task_id: str = Field(..., description="Celery identifier for progress tracking")
+    celery_task_id: str = Field(
+        ..., description="Celery identifier for progress tracking"
+    )
 
 
 @router.post(

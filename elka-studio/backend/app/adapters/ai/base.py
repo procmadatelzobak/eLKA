@@ -36,7 +36,9 @@ class BaseAIAdapter(ABC):
 
         raise NotImplementedError
 
-    def generate_json(self, system: str, user: str) -> Tuple[str, Optional[Dict[str, int]]]:
+    def generate_json(
+        self, system: str, user: str
+    ) -> Tuple[str, Optional[Dict[str, int]]]:
         """Return JSON text generated from a system/user prompt pair."""
 
         raise NotImplementedError
@@ -89,27 +91,39 @@ class HeuristicAIAdapter(BaseAIAdapter):
             messages.append("Story content is empty.")
             passed = False
         elif word_count < 50:
-            messages.append("Story is very short; consider expanding for richer detail.")
+            messages.append(
+                "Story is very short; consider expanding for richer detail."
+            )
             if aspect_lower != "format":
                 passed = False
 
         if aspect_lower == "format":
-            max_line_length = max((len(line) for line in cleaned.splitlines()), default=0)
+            max_line_length = max(
+                (len(line) for line in cleaned.splitlines()), default=0
+            )
             if max_line_length > 240:
-                messages.append("Some lines exceed 240 characters which may impact readability.")
+                messages.append(
+                    "Some lines exceed 240 characters which may impact readability."
+                )
                 passed = False
         elif aspect_lower == "continuity":
             paragraph_count = cleaned.count("\n\n") + 1 if cleaned else 0
             if paragraph_count < 2:
-                messages.append("Continuity check suggests adding more than one paragraph.")
+                messages.append(
+                    "Continuity check suggests adding more than one paragraph."
+                )
                 passed = False
         elif aspect_lower == "tone":
-            uppercase_ratio = sum(1 for ch in cleaned if ch.isupper()) / max(len(cleaned), 1)
+            uppercase_ratio = sum(1 for ch in cleaned if ch.isupper()) / max(
+                len(cleaned), 1
+            )
             if uppercase_ratio > 0.3:
                 messages.append("Tone analysis detected excessive uppercase usage.")
                 passed = False
         else:
-            messages.append("No specific heuristics for this aspect; marking as informational only.")
+            messages.append(
+                "No specific heuristics for this aspect; marking as informational only."
+            )
 
         return {
             "aspect": aspect_lower,
@@ -157,7 +171,11 @@ class HeuristicAIAdapter(BaseAIAdapter):
         import json
 
         payload = {"system": system.strip(), "user": user.strip()}
-        return json.dumps(payload), {"prompt_token_count": 0, "candidates_token_count": 0, "total_tokens": 0}
+        return json.dumps(payload), {
+            "prompt_token_count": 0,
+            "candidates_token_count": 0,
+            "total_tokens": 0,
+        }
 
     def generate_text(
         self, prompt: str, model_key: str | None = None
@@ -165,7 +183,11 @@ class HeuristicAIAdapter(BaseAIAdapter):
         """Return a deterministic text response for the provided prompt."""
 
         cleaned = prompt.strip()
-        return cleaned or "", {"prompt_token_count": 0, "candidates_token_count": 0, "total_tokens": 0}
+        return cleaned or "", {
+            "prompt_token_count": 0,
+            "candidates_token_count": 0,
+            "total_tokens": 0,
+        }
 
 
 def get_default_ai_adapter(config: Config) -> BaseAIAdapter:

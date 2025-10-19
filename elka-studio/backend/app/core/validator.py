@@ -14,7 +14,10 @@ from app.utils.config import Config
 
 from .schemas import ConsistencyIssue, FactEntity, FactEvent, FactGraph
 
-TEMPLATES_ROOT = Path(__file__).resolve().parent.parent / "templates" / "universe_scaffold"
+TEMPLATES_ROOT = (
+    Path(__file__).resolve().parent.parent / "templates" / "universe_scaffold"
+)
+
 
 @dataclass(slots=True)
 class ValidationStep:
@@ -71,13 +74,17 @@ class ValidatorEngine:
             )
             passed, raw_messages = self._interpret_analysis_payload(analysis, step_name)
             messages = self._normalise_messages(raw_messages)
-            steps.append(ValidationStep(name=step_name, passed=passed, messages=messages))
+            steps.append(
+                ValidationStep(name=step_name, passed=passed, messages=messages)
+            )
         overall_passed = all(step.passed for step in steps)
         return ValidationReport(passed=overall_passed, steps=steps)
 
     @staticmethod
     def _normalise_messages(messages: Iterable[str]) -> List[str]:
-        normalised = [str(message).strip() for message in messages if str(message).strip()]
+        normalised = [
+            str(message).strip() for message in messages if str(message).strip()
+        ]
         return normalised or ["No issues detected."]
 
     def _interpret_analysis_payload(
@@ -88,7 +95,9 @@ class ValidatorEngine:
         if isinstance(analysis, Mapping):
             passed = bool(analysis.get("passed", False))
             messages = analysis.get("messages", [])
-            if isinstance(messages, Iterable) and not isinstance(messages, (str, bytes, bytearray)):
+            if isinstance(messages, Iterable) and not isinstance(
+                messages, (str, bytes, bytearray)
+            ):
                 return passed, messages
             return passed, [str(messages)]
 
@@ -103,13 +112,17 @@ class ValidatorEngine:
             else:
                 return self._interpret_analysis_payload(parsed, step_name)
 
-        if isinstance(analysis, Sequence) and not isinstance(analysis, (bytes, bytearray, str)):
+        if isinstance(analysis, Sequence) and not isinstance(
+            analysis, (bytes, bytearray, str)
+        ):
             return False, analysis
 
         if hasattr(analysis, "passed") and hasattr(analysis, "messages"):
             passed = bool(getattr(analysis, "passed"))
             messages = getattr(analysis, "messages")
-            if isinstance(messages, Iterable) and not isinstance(messages, (str, bytes, bytearray)):
+            if isinstance(messages, Iterable) and not isinstance(
+                messages, (str, bytes, bytearray)
+            ):
                 return passed, messages
             return passed, [str(messages)]
 
@@ -189,7 +202,9 @@ def validate_universe(
     return issues
 
 
-def _validate_missing_entities(events: Iterable[FactEvent], known: Set[str]) -> List[ConsistencyIssue]:
+def _validate_missing_entities(
+    events: Iterable[FactEvent], known: Set[str]
+) -> List[ConsistencyIssue]:
     issues: List[ConsistencyIssue] = []
     for event in events:
         for participant in event.participants:
@@ -309,7 +324,11 @@ def _validate_legend_breaches(
             refs: List[str] = []
             level = "error"
         elif isinstance(finding, dict):
-            message = str(finding.get("message") or finding.get("issue") or "Legend breach detected.").strip()
+            message = str(
+                finding.get("message")
+                or finding.get("issue")
+                or "Legend breach detected."
+            ).strip()
             refs = [str(ref) for ref in finding.get("refs", []) if str(ref).strip()]
             level = str(finding.get("level", "error"))
         else:

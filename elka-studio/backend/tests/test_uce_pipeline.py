@@ -5,13 +5,8 @@ from __future__ import annotations
 import difflib
 from datetime import datetime
 from pathlib import Path
-import sys
 
 import git
-
-BACKEND_ROOT = Path(__file__).resolve().parents[1]
-if str(BACKEND_ROOT) not in sys.path:
-    sys.path.insert(0, str(BACKEND_ROOT))
 
 from app.adapters.git.base import GitAdapter
 from app.core.archivist import load_universe
@@ -67,7 +62,9 @@ def test_uce_pipeline_dry_run_apply_noop(tmp_path: Path) -> None:
         dry_run_diff.append(diff)
     assert any(block for block in dry_run_diff)
 
-    adapter = GitAdapter(project_path=tmp_path, config=Config(data={"git": {"default_branch": "main"}}))
+    adapter = GitAdapter(
+        project_path=tmp_path, config=Config(data={"git": {"default_branch": "main"}})
+    )
     timestamp = datetime.utcnow().strftime("%Y%m%d%H%M")
     branch_name = f"uce/{timestamp}-{_slugify('Battle of Dawn')}"
     adapter.create_branch(branch_name)

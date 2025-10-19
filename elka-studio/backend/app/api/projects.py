@@ -51,10 +51,16 @@ class ProjectCreateRequest(BaseModel):
         if not cleaned:
             raise ValueError("Git repository URL must not be empty.")
 
-        if cleaned.count("/") == 1 and "//" not in cleaned and not cleaned.startswith("git@"):
+        if (
+            cleaned.count("/") == 1
+            and "//" not in cleaned
+            and not cleaned.startswith("git@")
+        ):
             owner, repo = (part.strip() for part in cleaned.split("/", 1))
             if not owner or not repo:
-                raise ValueError("GitHub repository shorthand must be in the form 'owner/repository'.")
+                raise ValueError(
+                    "GitHub repository shorthand must be in the form 'owner/repository'."
+                )
             return f"https://github.com/{owner}/{repo}"
 
         parsed = urlparse(cleaned)
@@ -85,20 +91,30 @@ def get_project(project_id: int, session: Session = Depends(get_session)) -> dic
     """Retrieve a single project or return 404 if it doesn't exist."""
     project = session.get(Project, project_id)
     if project is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Project not found")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Project not found"
+        )
     return project.to_dict()
 
 
 @router.post("/", status_code=status.HTTP_201_CREATED, summary="Create a new project")
-def create_project(payload: ProjectCreateRequest, session: Session = Depends(get_session)) -> dict:
+def create_project(
+    payload: ProjectCreateRequest, session: Session = Depends(get_session)
+) -> dict:
     """Create a project, clone its Git repository and initialise scaffolding if needed."""
     try:
         secret_key = get_secret_key()
     except RuntimeError as exc:
-        logger.exception("Failed to access the secret key while creating project '%s'", payload.name)
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(exc)) from exc
+        logger.exception(
+            "Failed to access the secret key while creating project '%s'", payload.name
+        )
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(exc)
+        ) from exc
 
-    encrypted_token = encrypt(payload.git_token, secret_key) if payload.git_token else None
+    encrypted_token = (
+        encrypt(payload.git_token, secret_key) if payload.git_token else None
+    )
     projects_dir = _resolve_projects_dir()
     git_manager = GitManager(str(projects_dir))
     target_path = projects_dir / GitManager._normalize_project_name(payload.name)
@@ -114,10 +130,14 @@ def create_project(payload: ProjectCreateRequest, session: Session = Depends(get
         session.flush()
 
         try:
-            local_path = git_manager.clone_repo(payload.git_url, payload.name, payload.git_token)
+            local_path = git_manager.clone_repo(
+                payload.git_url, payload.name, payload.git_token
+            )
         except FileExistsError as exc:
             logger.error(
-                "Cannot create project '%s': target path '%s' already exists", payload.name, target_path
+                "Cannot create project '%s': target path '%s' already exists",
+                payload.name,
+                target_path,
             )
             session.rollback()
             raise HTTPException(
@@ -126,7 +146,9 @@ def create_project(payload: ProjectCreateRequest, session: Session = Depends(get
             ) from exc
         except Exception as exc:  # pragma: no cover - network dependent
             logger.exception(
-                "Failed to clone repository '%s' for project '%s'", payload.git_url, payload.name
+                "Failed to clone repository '%s' for project '%s'",
+                payload.git_url,
+                payload.name,
             )
             session.rollback()
             if target_path.exists():
@@ -140,7 +162,9 @@ def create_project(payload: ProjectCreateRequest, session: Session = Depends(get
             repo = git.Repo(local_path)
         except Exception as exc:  # pragma: no cover - git inspection dependent
             logger.exception(
-                "Failed to inspect cloned repository for project '%s' at '%s'", payload.name, local_path
+                "Failed to inspect cloned repository for project '%s' at '%s'",
+                payload.name,
+                local_path,
             )
             session.rollback()
             if Path(local_path).exists():
@@ -161,9 +185,13 @@ def create_project(payload: ProjectCreateRequest, session: Session = Depends(get
         session.add(project)
 
         if repo_empty:
-            scaffold_path = Path(__file__).resolve().parents[1] / "templates" / "universe_scaffold"
+            scaffold_path = (
+                Path(__file__).resolve().parents[1] / "templates" / "universe_scaffold"
+            )
             try:
-                git_manager._initialize_empty_repo(Path(project.local_path), scaffold_path, payload.git_token)
+                git_manager._initialize_empty_repo(
+                    Path(project.local_path), scaffold_path, payload.git_token
+                )
             except Exception as exc:  # pragma: no cover - network/IO dependent
                 logger.exception(
                     "Failed to scaffold initial universe for project '%s' in '%s'",
@@ -187,9 +215,14 @@ def sync_project(project_id: int, session: Session = Depends(get_session)) -> di
     """Pull the latest changes for the specified project repository."""
     project = session.get(Project, project_id)
     if project is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Project not found")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Project not found"
+        )
     if not project.local_path:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Project has no local repository path")
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Project has no local repository path",
+        )
 
     local_path = Path(project.local_path)
     git_manager = GitManager(str(local_path.parent))

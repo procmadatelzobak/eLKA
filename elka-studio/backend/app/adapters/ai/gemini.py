@@ -21,6 +21,8 @@ from app.utils.config import Config
 
 
 logger = logging.getLogger(__name__)
+
+
 @dataclass(slots=True)
 class GeminiAdapter(BaseAIAdapter):
     """Parametric adapter for Google Gemini models."""
@@ -128,9 +130,9 @@ class GeminiAdapter(BaseAIAdapter):
         prompt_tokens = getattr(usage, "prompt_token_count", None) or getattr(
             usage, "prompt_tokens", 0
         )
-        candidate_tokens = getattr(
-            usage, "candidates_token_count", None
-        ) or getattr(usage, "candidates_tokens", 0)
+        candidate_tokens = getattr(usage, "candidates_token_count", None) or getattr(
+            usage, "candidates_tokens", 0
+        )
         metadata = {
             "prompt_token_count": int(prompt_tokens or 0),
             "candidates_token_count": int(candidate_tokens or 0),
@@ -141,9 +143,9 @@ class GeminiAdapter(BaseAIAdapter):
         if total is not None:
             metadata["total_tokens"] = int(total)
         else:
-            metadata["total_tokens"] = metadata["prompt_token_count"] + metadata[
-                "candidates_token_count"
-            ]
+            metadata["total_tokens"] = (
+                metadata["prompt_token_count"] + metadata["candidates_token_count"]
+            )
         return metadata
 
     def generate_text(
@@ -220,13 +222,17 @@ class GeminiAdapter(BaseAIAdapter):
             "Provide a concise summary (no more than 40 words) of the following story. "
             "Return plain text without bullet points."
         )
-        summary = self.generate_markdown(instruction=instruction, context=story_content).strip()
+        summary = self.generate_markdown(
+            instruction=instruction, context=story_content
+        ).strip()
         return summary or "Summary unavailable"
 
     def generate_markdown(self, instruction: str, context: str | None = None) -> str:
         """Generate Markdown content using the Gemini model."""
 
-        contents = instruction if not context else f"{instruction}\n\nCONTEXT:\n{context}"
+        contents = (
+            instruction if not context else f"{instruction}\n\nCONTEXT:\n{context}"
+        )
         text, _ = self.generate_text(contents)
         return text
 
@@ -360,7 +366,9 @@ class GeminiAdapter(BaseAIAdapter):
                 return seconds
 
         message = str(exc)
-        match = re.search(r"retry\s*(?:in|after)\s*(\d+(?:\.\d+)?)", message, re.IGNORECASE)
+        match = re.search(
+            r"retry\s*(?:in|after)\s*(\d+(?:\.\d+)?)", message, re.IGNORECASE
+        )
         if match:
             seconds = float(match.group(1))
             if seconds > 0:
@@ -392,7 +400,9 @@ class GeminiAdapter(BaseAIAdapter):
             raise exc
 
         logger.warning("Gemini rate limit hit during %s: %s", operation, exc)
-        limit_type = "Token Count" if "token_count" in str(exc) else "Request Rate (RPM)"
+        limit_type = (
+            "Token Count" if "token_count" in str(exc) else "Request Rate (RPM)"
+        )
         logger.warning(
             "Detected Limit Type: %s. Consider adjusting context size or RPM config.",
             limit_type,

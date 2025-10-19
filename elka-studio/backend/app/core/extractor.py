@@ -156,7 +156,14 @@ def _map_entity_type(raw_type: str) -> EntityType:
         return EntityType.ITEM
     if normalised in {"material", "substance", "element", "alloy"}:
         return EntityType.MATERIAL
-    if normalised in {"organization", "organisation", "faction", "guild", "order", "clan"}:
+    if normalised in {
+        "organization",
+        "organisation",
+        "faction",
+        "guild",
+        "order",
+        "clan",
+    }:
         return EntityType.ORGANIZATION
     return EntityType.OTHER
 

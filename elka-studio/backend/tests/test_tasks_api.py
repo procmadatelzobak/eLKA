@@ -2,16 +2,9 @@
 
 from __future__ import annotations
 
-from pathlib import Path
-import sys
-
 import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
-
-BACKEND_ROOT = Path(__file__).resolve().parents[1]
-if str(BACKEND_ROOT) not in sys.path:
-    sys.path.insert(0, str(BACKEND_ROOT))
 
 from app.api import tasks
 from app.db.session import Base
@@ -22,7 +15,9 @@ from app.models.task import Task, TaskStatus
 def in_memory_session():
     """Provide an isolated in-memory database session for tests."""
 
-    engine = create_engine("sqlite:///:memory:", connect_args={"check_same_thread": False})
+    engine = create_engine(
+        "sqlite:///:memory:", connect_args={"check_same_thread": False}
+    )
     TestingSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
     Base.metadata.create_all(engine)
     session = TestingSessionLocal()
@@ -34,7 +29,9 @@ def in_memory_session():
         engine.dispose()
 
 
-def test_update_task_status_broadcasts_pause(monkeypatch: pytest.MonkeyPatch, in_memory_session) -> None:
+def test_update_task_status_broadcasts_pause(
+    monkeypatch: pytest.MonkeyPatch, in_memory_session
+) -> None:
     """Pausing a task uses the task manager instance to broadcast the update."""
 
     task = Task(project_id=101, type="dummy", status=TaskStatus.RUNNING)
@@ -64,7 +61,10 @@ def test_task_serialization_includes_payload() -> None:
         type="generate_story",
         status=TaskStatus.SUCCESS,
         params={"seed": "tajemná knihovna"},
-        result={"story": "Byl jednou jeden příběh", "files": {"Lore/story.md": "obsah"}},
+        result={
+            "story": "Byl jednou jeden příběh",
+            "files": {"Lore/story.md": "obsah"},
+        },
         total_input_tokens=120,
         total_output_tokens=55,
     )
@@ -87,11 +87,17 @@ def test_process_story_response_masks_tokens(monkeypatch: pytest.MonkeyPatch) ->
         id = 42
         celery_task_id = "abc123"
 
-    def fake_create_task(project_id: int, task_type: str, params: dict) -> DummyTaskRecord:
+    def fake_create_task(
+        project_id: int, task_type: str, params: dict
+    ) -> DummyTaskRecord:
         assert "super-secret-token" not in str(params)
         return DummyTaskRecord()
 
-    monkeypatch.setattr(tasks, "task_manager", type("DummyManager", (), {"create_task": staticmethod(fake_create_task)})())
+    monkeypatch.setattr(
+        tasks,
+        "task_manager",
+        type("DummyManager", (), {"create_task": staticmethod(fake_create_task)})(),
+    )
 
     payload = tasks.ProcessStoryRequest(project_id=1, story_text="Legend", apply=False)
     response = tasks.process_story(payload)

@@ -20,6 +20,8 @@ from sqlalchemy import (
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from sqlalchemy.sql import expression
 
+from ..db.session import Base
+
 
 class TaskStatus(str):
     """String-based task statuses shared across the application."""
@@ -30,7 +32,6 @@ class TaskStatus(str):
     FAILURE = "FAILURE"
     PAUSED = "PAUSED"
 
-from ..db.session import Base
 
 if TYPE_CHECKING:  # pragma: no cover
     from .project import Project
@@ -58,9 +59,14 @@ class Task(Base):
         default=False,
         server_default=expression.false(),
     )
-    created_at: Mapped[datetime] = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    created_at: Mapped[datetime] = Column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
     updated_at: Mapped[datetime] = Column(
-        DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now()
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+        onupdate=func.now(),
     )
 
     parent_task_id: Mapped[Optional[int]] = mapped_column(

@@ -23,7 +23,9 @@ class FactEntity(BaseModel):
     ]
     labels: List[str] = Field(default_factory=list, description="Alternative names")
     summary: Optional[str] = Field(default=None, description="Short description")
-    attributes: Dict[str, str] = Field(default_factory=dict, description="Key-value facts")
+    attributes: Dict[str, str] = Field(
+        default_factory=dict, description="Key-value facts"
+    )
 
 
 class FactEvent(BaseModel):

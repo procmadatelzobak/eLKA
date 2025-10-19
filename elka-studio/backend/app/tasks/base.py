@@ -27,7 +27,9 @@ class BaseTask(Task):
     retry_backoff_max = 600
     retry_jitter = True
 
-    def __call__(self, *args: Any, **kwargs: Any) -> Any:  # pragma: no cover - celery runtime
+    def __call__(
+        self, *args: Any, **kwargs: Any
+    ) -> Any:  # pragma: no cover - celery runtime
         self.db_task_id: int | None = None
         if args:
             candidate = args[0]
@@ -66,7 +68,9 @@ class BaseTask(Task):
                 session.add(task)
                 session.commit()
         except Exception as exc:  # pragma: no cover - defensive logging
-            logger.error("Failed to persist token counters for task %s: %s", self.db_task_id, exc)
+            logger.error(
+                "Failed to persist token counters for task %s: %s", self.db_task_id, exc
+            )
 
 
 @celery_app.task(bind=True, base=BaseTask, name="app.tasks.dummy_task")
