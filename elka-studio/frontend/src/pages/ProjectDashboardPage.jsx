@@ -5,14 +5,6 @@ import { createTask, deleteTask, fetchProject, pauseTask, resetProject, resumeTa
 import ProjectSettings from './ProjectSettings';
 import './ProjectDashboardPage.css';
 
-const statusColors = {
-  pending: '#facc15',
-  running: '#3b82f6',
-  completed: '#22c55e',
-  failed: '#ef4444',
-  paused: '#f97316',
-};
-
 const taskActionMessages = {
   pause: 'Task paused successfully.',
   resume: 'Task resumed successfully.',
@@ -23,7 +15,6 @@ const ProjectDashboardPage = () => {
   const [tasks, setTasks] = useState([]);
   const [projectDetails, setProjectDetails] = useState(null);
   const [projectName, setProjectName] = useState('');
-  const [activeTab, setActiveTab] = useState('generate_story');
   const [seedValue, setSeedValue] = useState('');
   const [storyTitle, setStoryTitle] = useState('');
   const [storyAuthor, setStoryAuthor] = useState('eLKA User');
@@ -70,6 +61,7 @@ const ProjectDashboardPage = () => {
         }
       } catch (error) {
         if (isMounted) {
+          console.warn('Failed to fetch project details.', error);
           setProjectDetails(null);
           setProjectName('');
         }
@@ -82,11 +74,6 @@ const ProjectDashboardPage = () => {
       isMounted = false;
     };
   }, [projectId]);
-
-  useEffect(() => {
-    setFormError(null);
-    setFormMessage(null);
-  }, [activeTab]);
 
   useEffect(() => {
     setResetMessage(null);
@@ -485,179 +472,145 @@ const ProjectDashboardPage = () => {
       </header>
 
       <div className="project-dashboard__layout">
-        <section className="project-dashboard__panel project-dashboard__panel--control" aria-label="Control panel">
+        <aside className="project-dashboard__panel project-dashboard__panel--control task-forms" aria-label="Control panel">
           <h2>New Task</h2>
-          <div className="task-forms">
-          <div className="task-forms__tabs" role="tablist" aria-label="Task types">
-            <button
-              type="button"
-              role="tab"
-              aria-selected={activeTab === 'generate_story'}
-              className={`task-forms__tab ${
-                  activeTab === 'generate_story'
-                    ? 'task-forms__tab--active'
-                    : ''
-                }`}
-              onClick={() => setActiveTab('generate_story')}
-            >
-              Generate Story
-            </button>
-            <button
-              type="button"
-              role="tab"
-              aria-selected={activeTab === 'process_story'}
-              className={`task-forms__tab ${activeTab === 'process_story' ? 'task-forms__tab--active' : ''}`}
-              onClick={() => setActiveTab('process_story')}
-            >
-              Process Existing Story
-            </button>
-            <button
-              type="button"
-              role="tab"
-              aria-selected={activeTab === 'generate_saga'}
-              className={`task-forms__tab ${activeTab === 'generate_saga' ? 'task-forms__tab--active' : ''}`}
-                onClick={() => setActiveTab('generate_saga')}
-              >
-                Create Saga
+          {formError && <div className="task-forms__alert task-forms__alert--error">{formError}</div>}
+          {formMessage && <div className="task-forms__alert task-forms__alert--success">{formMessage}</div>}
+
+          <details className="task-forms__section" open>
+            <summary className="task-forms__summary">
+              <h3>Create Saga</h3>
+            </summary>
+            <form className="task-form" onSubmit={(event) => handleSubmit(event, 'generate_saga')}>
+              <label className="task-form__label" htmlFor="saga-title">
+                Story/Saga Title
+              </label>
+              <input
+                id="saga-title"
+                type="text"
+                name="storyTitle"
+                className="task-form__input"
+                value={sagaTitle}
+                onChange={(event) => setSagaTitle(event.target.value)}
+                placeholder="e.g. Rise of the Machine Empire"
+                required
+              />
+              <label className="task-form__label" htmlFor="saga-author">
+                Author
+              </label>
+              <input
+                id="saga-author"
+                type="text"
+                name="storyAuthor"
+                className="task-form__input"
+                value={sagaAuthor}
+                onChange={(event) => setSagaAuthor(event.target.value)}
+                placeholder="e.g. eLKA User"
+                required
+              />
+              <label className="task-form__label" htmlFor="saga-theme">
+                Saga theme
+              </label>
+              <textarea
+                id="saga-theme"
+                name="theme"
+                className="task-form__textarea"
+                rows={3}
+                value={sagaTheme}
+                onChange={(event) => setSagaTheme(event.target.value)}
+                placeholder="e.g. Rise of the Machine Empire"
+              />
+              <label className="task-form__label" htmlFor="saga-chapters">
+                Number of chapters
+              </label>
+              <input
+                id="saga-chapters"
+                type="number"
+                min="1"
+                name="chapters"
+                className="task-form__input"
+                value={sagaChapters}
+                onChange={(event) => setSagaChapters(event.target.value)}
+              />
+              <button type="submit" className="task-form__submit" disabled={isSubmitting}>
+                {isSubmitting ? 'Submitting…' : 'Submit'}
               </button>
-            </div>
+            </form>
+          </details>
 
-            <div className="task-forms__content">
-              {formError && <div className="task-forms__alert task-forms__alert--error">{formError}</div>}
-              {formMessage && <div className="task-forms__alert task-forms__alert--success">{formMessage}</div>}
+          <details className="task-forms__section">
+            <summary className="task-forms__summary">
+              <h3>Generate Story</h3>
+            </summary>
+            <form className="task-form" onSubmit={(event) => handleSubmit(event, 'generate_story')}>
+              <label className="task-form__label" htmlFor="story-title">
+                Story/Saga Title
+              </label>
+              <input
+                id="story-title"
+                type="text"
+                name="storyTitle"
+                className="task-form__input"
+                value={storyTitle}
+                onChange={(event) => setStoryTitle(event.target.value)}
+                placeholder="e.g. Chronicles of Avalon"
+                required
+              />
+              <label className="task-form__label" htmlFor="story-author">
+                Author
+              </label>
+              <input
+                id="story-author"
+                type="text"
+                name="storyAuthor"
+                className="task-form__input"
+                value={storyAuthor}
+                onChange={(event) => setStoryAuthor(event.target.value)}
+                placeholder="e.g. eLKA User"
+                required
+              />
+              <label className="task-form__label" htmlFor="seed-value">
+                Seed
+              </label>
+              <input
+                id="seed-value"
+                type="text"
+                name="seed"
+                className="task-form__input"
+                value={seedValue}
+                onChange={(event) => setSeedValue(event.target.value)}
+                placeholder="e.g. a hidden library in the mountains"
+              />
+              <button type="submit" className="task-form__submit" disabled={isSubmitting}>
+                {isSubmitting ? 'Submitting…' : 'Submit'}
+              </button>
+            </form>
+          </details>
 
-              {activeTab === 'generate_story' && (
-                <form
-                  className="task-form"
-                  onSubmit={(event) =>
-                    handleSubmit(event, 'generate_story')
-                  }
-                >
-                  <label className="task-form__label" htmlFor="storyTitle">
-                    Story/Saga Title
-                  </label>
-                  <input
-                    id="storyTitle"
-                    type="text"
-                    name="storyTitle"
-                    className="task-form__input"
-                    value={storyTitle}
-                    onChange={(event) => setStoryTitle(event.target.value)}
-                    placeholder="e.g. Chronicles of Avalon"
-                    required
-                  />
-                  <label className="task-form__label" htmlFor="storyAuthor">
-                    Author
-                  </label>
-                  <input
-                    id="storyAuthor"
-                    type="text"
-                    name="storyAuthor"
-                    className="task-form__input"
-                    value={storyAuthor}
-                    onChange={(event) => setStoryAuthor(event.target.value)}
-                    placeholder="e.g. eLKA User"
-                    required
-                  />
-                  <label className="task-form__label" htmlFor="seed-value">
-                    Seed
-                  </label>
-                  <input
-                    id="seed-value"
-                    type="text"
-                    name="seed"
-                    className="task-form__input"
-                    value={seedValue}
-                    onChange={(event) => setSeedValue(event.target.value)}
-                    placeholder="e.g. a hidden library in the mountains"
-                  />
-                  <button type="submit" className="task-form__submit" disabled={isSubmitting}>
-                    {isSubmitting ? 'Submitting…' : 'Submit'}
-                  </button>
-                </form>
-              )}
+          <details className="task-forms__section">
+            <summary className="task-forms__summary">
+              <h3>Process Existing Story</h3>
+            </summary>
+            <form className="task-form" onSubmit={handleProcessStorySubmit}>
+              <label className="task-form__label" htmlFor="story-content">
+                Story text
+              </label>
+              <textarea
+                id="story-content"
+                className="task-form__textarea"
+                rows={8}
+                value={storyContent}
+                onChange={(event) => setStoryContent(event.target.value)}
+                placeholder="Paste the story you want to validate and archive"
+              />
+              <button type="submit" className="task-form__submit" disabled={isSubmitting}>
+                {isSubmitting ? 'Submitting…' : 'Submit'}
+              </button>
+            </form>
+          </details>
+        </aside>
 
-              {activeTab === 'process_story' && (
-                <form className="task-form" onSubmit={handleProcessStorySubmit}>
-                  <label className="task-form__label" htmlFor="story-content">
-                    Story text
-                  </label>
-                  <textarea
-                    id="story-content"
-                    className="task-form__textarea"
-                    rows={8}
-                    value={storyContent}
-                    onChange={(event) => setStoryContent(event.target.value)}
-                    placeholder="Paste the story you want to validate and archive"
-                  />
-                  <button type="submit" className="task-form__submit" disabled={isSubmitting}>
-                    {isSubmitting ? 'Submitting…' : 'Submit'}
-                  </button>
-                </form>
-              )}
-
-              {activeTab === 'generate_saga' && (
-                <form className="task-form" onSubmit={(event) => handleSubmit(event, 'generate_saga')}>
-                  <label className="task-form__label" htmlFor="storyTitle">
-                    Story/Saga Title
-                  </label>
-                  <input
-                    id="storyTitle"
-                    type="text"
-                    name="storyTitle"
-                    className="task-form__input"
-                    value={sagaTitle}
-                    onChange={(event) => setSagaTitle(event.target.value)}
-                    placeholder="e.g. Rise of the Machine Empire"
-                    required
-                  />
-                  <label className="task-form__label" htmlFor="storyAuthor">
-                    Author
-                  </label>
-                  <input
-                    id="storyAuthor"
-                    type="text"
-                    name="storyAuthor"
-                    className="task-form__input"
-                    value={sagaAuthor}
-                    onChange={(event) => setSagaAuthor(event.target.value)}
-                    placeholder="e.g. eLKA User"
-                    required
-                  />
-                  <label className="task-form__label" htmlFor="saga-theme">
-                    Saga theme
-                  </label>
-                  <input
-                    id="saga-theme"
-                    type="text"
-                    name="theme"
-                    className="task-form__input"
-                    value={sagaTheme}
-                    onChange={(event) => setSagaTheme(event.target.value)}
-                    placeholder="e.g. Rise of the Machine Empire"
-                  />
-                  <label className="task-form__label" htmlFor="saga-chapters">
-                    Number of chapters
-                  </label>
-                  <input
-                    id="saga-chapters"
-                    type="number"
-                    min="1"
-                    name="chapters"
-                    className="task-form__input"
-                    value={sagaChapters}
-                    onChange={(event) => setSagaChapters(event.target.value)}
-                  />
-                  <button type="submit" className="task-form__submit" disabled={isSubmitting}>
-                    {isSubmitting ? 'Submitting…' : 'Submit'}
-                  </button>
-                </form>
-              )}
-            </div>
-          </div>
-        </section>
-
-        <section className="project-dashboard__panel project-dashboard__panel--queue" aria-label="Task queue">
+        <section className="project-dashboard__panel project-dashboard__panel--queue task-queue" aria-label="Task queue">
           <div className="task-queue__header">
             <h2>Task Queue</h2>
             <p className="task-queue__subtitle">Updates in real time via WebSocket.</p>
@@ -674,18 +627,17 @@ const ProjectDashboardPage = () => {
             <div className="task-queue__list">
               {sortedTasks.map((task) => {
                 const progressValue = getProgressValue(task);
-                const statusColor = statusColors[task.status] || '#94a3b8';
                 const expanded = isTaskExpanded(task.id);
                 const storyText = typeof task?.result?.story === 'string' ? task.result.story.trim() : '';
                 const files = task?.result?.files;
                 const hasStory = storyText.length > 0;
                 const hasFiles = files && Object.keys(files).length > 0;
                 const formatTokens = (value) =>
-                  typeof value === 'number' && Number.isFinite(value)
-                    ? value.toLocaleString('en-US')
-                    : 'N/A';
-                const inputTokensDisplay = formatTokens(task?.total_input_tokens);
-                const outputTokensDisplay = formatTokens(task?.total_output_tokens);
+                  typeof value === 'number' && Number.isFinite(value) ? value.toLocaleString('en-US') : '0';
+                const inputTokensDisplay = formatTokens(task?.input_tokens ?? task?.total_input_tokens);
+                const outputTokensDisplay = formatTokens(task?.output_tokens ?? task?.total_output_tokens);
+                const normalizedStatus = typeof task?.status === 'string' ? task.status.toLowerCase() : 'unknown';
+                const showTokenSummary = task?.input_tokens != null || task?.output_tokens != null;
 
                 return (
                   <article key={task.id} className="task-card">
@@ -695,13 +647,20 @@ const ProjectDashboardPage = () => {
                           {task.type || 'Unknown type'} <span className="task-card__id">#{task.id}</span>
                         </h3>
                         <div className="task-card__status">
-                          <span className="task-card__status-dot" style={{ backgroundColor: statusColor }} />
-                          <span>{task.status || 'Unknown status'}</span>
+                          <span className={`task-status-badge status-${normalizedStatus}`}>
+                            {task.status || 'Unknown status'}
+                          </span>
                         </div>
                         <div className="task-card__tokens">
                           <span>Input: {inputTokensDisplay}</span>
                           <span>Output: {outputTokensDisplay}</span>
+                          {showTokenSummary && (
+                            <span className="task-card__token-summary">
+                              Tokeny: {inputTokensDisplay} (vstup) / {outputTokensDisplay} (výstup)
+                            </span>
+                          )}
                         </div>
+                        {task?.error && <div className="task-error">{task.error}</div>}
                       </div>
                       <div className="task-card__actions">
                         <button
