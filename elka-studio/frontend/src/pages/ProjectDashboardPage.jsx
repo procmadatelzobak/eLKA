@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useParams } from 'react-router-dom';
 import TaskSocket from '../services/websocket';
-import { createTask, deleteTask, fetchProject, pauseTask, resumeTask } from '../services/api';
+import { createTask, deleteTask, fetchProject, pauseTask, resetProject, resumeTask } from '../services/api';
 import './ProjectDashboardPage.css';
 
 const statusColors = {
@@ -39,6 +39,9 @@ const ProjectDashboardPage = () => {
   const [expandedTasks, setExpandedTasks] = useState([]);
   const [pendingActions, setPendingActions] = useState({});
   const [modalContent, setModalContent] = useState(null);
+  const [isResetting, setIsResetting] = useState(false);
+  const [resetMessage, setResetMessage] = useState(null);
+  const [resetError, setResetError] = useState(null);
 
   useEffect(() => {
     const socket = new TaskSocket();
@@ -80,6 +83,11 @@ const ProjectDashboardPage = () => {
     setFormError(null);
     setFormMessage(null);
   }, [activeTab]);
+
+  useEffect(() => {
+    setResetMessage(null);
+    setResetError(null);
+  }, [projectId]);
 
   useEffect(() => {
     if (!modalContent) {
@@ -200,6 +208,30 @@ const ProjectDashboardPage = () => {
       setTaskActionError(detail);
     } finally {
       setPendingState(taskId, 'delete', false);
+    }
+  };
+
+  const handleResetUniverse = async () => {
+    const confirmed = window.confirm(
+      'Resetting the universe removes Stories, Legends, Objects, and timeline files before restoring the default scaffold. Continue?'
+    );
+
+    if (!confirmed) {
+      return;
+    }
+
+    setIsResetting(true);
+    setResetError(null);
+    setResetMessage(null);
+
+    try {
+      await resetProject(projectId);
+      setResetMessage('Universe reset successfully. Fresh scaffold committed.');
+    } catch (error) {
+      const detail = error.response?.data?.detail || 'Failed to reset the universe.';
+      setResetError(detail);
+    } finally {
+      setIsResetting(false);
     }
   };
 
@@ -372,6 +404,22 @@ const ProjectDashboardPage = () => {
               <strong>Estimated universe tokens:</strong> {estimatedTokens}
             </p>
           )}
+        </div>
+        <div className="project-dashboard__actions" aria-live="polite">
+          {resetError && (
+            <p className="project-dashboard__alert project-dashboard__alert--error">{resetError}</p>
+          )}
+          {resetMessage && (
+            <p className="project-dashboard__alert project-dashboard__alert--success">{resetMessage}</p>
+          )}
+          <button
+            type="button"
+            className="project-dashboard__reset-button"
+            onClick={handleResetUniverse}
+            disabled={isResetting}
+          >
+            {isResetting ? 'Resetting…' : 'Reset Universe'}
+          </button>
         </div>
       </header>
 

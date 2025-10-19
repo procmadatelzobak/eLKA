@@ -251,6 +251,54 @@ class GitManager:
             )
         return candidate
 
+    def reset_universe(self, project: Project, token: str | None) -> None:
+        """Delete universe content and restore the scaffold for ``project``."""
+
+        project_path = self.resolve_project_path(project)
+        repo = git.Repo(project_path)
+        branch_name = self._determine_branch(repo)
+
+        try:
+            repo.git.checkout(branch_name)
+        except GitCommandError:
+            try:
+                repo.git.checkout("-B", branch_name, f"origin/{branch_name}")
+            except GitCommandError:
+                repo.git.checkout(branch_name)
+
+        removal_targets = {
+            "Objects",
+            "Stories",
+            "Legends",
+            "Instructions",
+            "objects",
+            "stories",
+            "legends",
+            "instructions",
+            "Objekty",
+            "Příběhy",
+            "Legendy",
+            "Pokyny",
+        }
+        for entry in removal_targets:
+            candidate = project_path / entry
+            if candidate.exists() and candidate.is_dir():
+                shutil.rmtree(candidate, ignore_errors=True)
+
+        for timeline_name in ("timeline.md", "timeline.txt", "Timeline.md", "Timeline.txt"):
+            candidate = project_path / timeline_name
+            if candidate.exists() and candidate.is_file():
+                candidate.unlink(missing_ok=True)
+
+        self._ensure_identity(repo)
+        repo.git.add(all=True)
+        repo.index.commit("Reset universe")
+
+        scaffold_path = (
+            Path(__file__).resolve().parents[1] / "templates" / "universe_scaffold"
+        )
+        self._initialize_empty_repo(project_path, scaffold_path, token)
+
     def load_universe_files(
         self,
         project_path: Path | str,

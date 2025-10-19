@@ -54,4 +54,6 @@ export const fetchAiSettings = async () => {
 
 export const updateAiSettings = (settings) => getApiClient().post('/settings/ai', settings);
 
+export const resetProject = (projectId) => getApiClient().post(`/projects/${projectId}/reset`);
+
 export default getApiClient;

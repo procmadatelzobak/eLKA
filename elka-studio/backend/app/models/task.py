@@ -51,6 +51,8 @@ class Task(Base):
     progress: Mapped[int | None] = Column(Integer, nullable=True)
     params: Mapped[dict[str, Any] | None] = Column(JSON, nullable=True, default=dict)
     result: Mapped[dict[str, Any] | None] = Column(JSON, nullable=True, default=dict)
+    input_tokens: Mapped[int | None] = Column(Integer, nullable=True)
+    output_tokens: Mapped[int | None] = Column(Integer, nullable=True)
     total_input_tokens: Mapped[int | None] = Column(Integer, nullable=True, default=0)
     total_output_tokens: Mapped[int | None] = Column(Integer, nullable=True, default=0)
     result_approved: Mapped[bool] = Column(
@@ -94,6 +96,8 @@ class Task(Base):
             "params": deepcopy(self.params) if self.params is not None else None,
             "result": deepcopy(self.result) if self.result is not None else None,
             "result_approved": self.result_approved,
+            "input_tokens": self.input_tokens,
+            "output_tokens": self.output_tokens,
             "total_input_tokens": self.total_input_tokens,
             "total_output_tokens": self.total_output_tokens,
             "created_at": self.created_at.isoformat() if self.created_at else None,

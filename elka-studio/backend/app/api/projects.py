@@ -18,7 +18,7 @@ from ..db.session import get_session
 from ..models.project import Project
 from ..services import GitManager
 from ..utils.config import load_config
-from ..utils.security import encrypt, get_secret_key
+from ..utils.security import decrypt, encrypt, get_secret_key
 
 logger = logging.getLogger(__name__)
 
@@ -238,6 +238,51 @@ def sync_project(project_id: int, session: Session = Depends(get_session)) -> di
     return project.to_dict()
 
 
+@router.post("/{project_id}/reset", summary="Reset a project to the scaffold state")
+def reset_project(project_id: int, session: Session = Depends(get_session)) -> dict:
+    project = session.get(Project, project_id)
+    if project is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Project not found"
+        )
+
+    try:
+        secret_key = get_secret_key()
+    except RuntimeError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(exc)
+        ) from exc
+
+    decrypted_token: str | None = None
+    if project.git_token:
+        try:
+            decrypted_token = decrypt(project.git_token, secret_key)
+        except Exception as exc:  # pragma: no cover - defensive branch
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"Failed to decrypt Git token: {exc}",
+            ) from exc
+
+    projects_dir = _resolve_projects_dir()
+    git_manager = GitManager(str(projects_dir))
+
+    try:
+        git_manager.reset_universe(project, decrypted_token)
+    except FileNotFoundError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=str(exc),
+        ) from exc
+    except Exception as exc:  # pragma: no cover - IO/network dependent
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to reset project universe: {exc}",
+        ) from exc
+
+    session.refresh(project)
+    return project.to_dict()
+
+
 def _resolve_projects_dir() -> Path:
     """Return the projects directory from configuration or fall back to defaults."""
     env_override = os.getenv("ELKA_PROJECTS_DIR")
@@ -257,4 +302,5 @@ __all__ = [
     "get_project",
     "create_project",
     "sync_project",
+    "reset_project",
 ]
