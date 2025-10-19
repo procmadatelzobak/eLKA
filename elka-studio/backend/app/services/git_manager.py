@@ -220,7 +220,7 @@ class GitManager:
             helper_path = Path(__file__).parent / "git_credential_helper.sh"
             env["GIT_TOKEN"] = token
             env["GIT_CONFIG_PARAMETERS"] = (
-                f"credential.helper=!sh {helper_path.resolve()}"
+                f"credential.helper=!sh '{helper_path.resolve()}'"
             )
         return env
 
