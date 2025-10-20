@@ -17,7 +17,7 @@ from sqlalchemy import (
     Text,
     func,
 )
-from sqlalchemy.orm import Mapped, mapped_column, relationship
+from sqlalchemy.orm import Mapped, relationship
 from sqlalchemy.sql import expression
 
 from ..db.session import Base
@@ -71,9 +71,11 @@ class Task(Base):
         onupdate=func.now(),
     )
 
-    parent_task_id: Mapped[Optional[int]] = mapped_column(
-        ForeignKey("tasks.id"), nullable=True
+    parent_task_id: Mapped[int | None] = Column(
+        Integer, ForeignKey("tasks.id"), nullable=True, index=True
     )
+    saga_plan: Mapped[str | None] = Column(Text, nullable=True)
+    story_content: Mapped[str | None] = Column(Text, nullable=True)
 
     project: Mapped["Project"] = relationship("Project", back_populates="tasks")
     children: Mapped[List["Task"]] = relationship(
@@ -100,6 +102,9 @@ class Task(Base):
             "output_tokens": self.output_tokens,
             "total_input_tokens": self.total_input_tokens,
             "total_output_tokens": self.total_output_tokens,
+            "parent_task_id": self.parent_task_id,
+            "saga_plan": self.saga_plan,
+            "story_content": self.story_content,
             "created_at": self.created_at.isoformat() if self.created_at else None,
             "updated_at": self.updated_at.isoformat() if self.updated_at else None,
         }
