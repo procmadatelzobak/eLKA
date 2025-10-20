@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import asyncio
+import logging
 from copy import deepcopy
 from typing import Any, Callable, Tuple
 
@@ -16,6 +18,7 @@ from app.db.session import SessionLocal
 from app.models.project import Project, Setting
 from app.models.task import Task, TaskStatus
 from app.core.context import app_context
+from app.api.websockets import manager as ws_manager
 from app.tasks.base import dummy_task
 from app.tasks import lore_tasks
 
@@ -46,6 +49,7 @@ class TaskManager:
         self._session_factory = session_factory
         self._redis_client = get_redis_client()
         self.config = app_context.config
+        self.logger = logging.getLogger(__name__)
 
     def get_project_ai_models(self, project_id: int) -> dict[str, str]:
         """
@@ -117,6 +121,59 @@ class TaskManager:
             session.close()
 
         return task
+
+    def update_task_field(self, celery_task_id: str, field: str, value: Any) -> None:
+        """Update a single task field and broadcast the change."""
+
+        session = SessionLocal()
+        try:
+            task_in_db = (
+                session.query(Task)
+                .filter_by(celery_task_id=celery_task_id)
+                .first()
+            )
+            if not task_in_db:
+                self.logger.warning(
+                    "Task with celery_id %s not found, cannot update field '%s'.",
+                    celery_task_id,
+                    field,
+                )
+                return
+
+            setattr(task_in_db, field, value)
+            session.commit()
+            session.refresh(task_in_db)
+
+            task_data = task_in_db.to_dict()
+            task_data["project_id"] = task_in_db.project_id
+
+            try:
+                asyncio.run(ws_manager.broadcast_task_update(task_data))
+            except RuntimeError:
+                loop = asyncio.new_event_loop()
+                try:
+                    asyncio.set_event_loop(loop)
+                    loop.run_until_complete(
+                        ws_manager.broadcast_task_update(task_data)
+                    )
+                finally:
+                    asyncio.set_event_loop(None)
+                    loop.close()
+
+            self._broadcast_update(task_in_db.project_id)
+            self.logger.info(
+                "Updated field '%s' for task %s", field, task_in_db.id
+            )
+        except Exception as exc:
+            session.rollback()
+            self.logger.error(
+                "Failed to update field '%s' for task %s: %s",
+                field,
+                celery_task_id,
+                exc,
+            )
+        finally:
+            session.close()
 
     def update_task_status(
         self,

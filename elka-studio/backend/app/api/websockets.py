@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
-from typing import Dict, Set
+from typing import Any, Dict, Set
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
@@ -71,6 +71,20 @@ class ConnectionManager:
             except WebSocketDisconnect:
                 await self.disconnect(project_id, websocket)
 
+    async def broadcast_task_update(self, task_data: dict[str, Any]) -> None:
+        """Send an updated task payload to listeners for the project."""
+
+        project_id = task_data.get("project_id")
+        try:
+            project_id_int = int(project_id)
+        except (TypeError, ValueError):
+            return
+
+        if not self.has_project(project_id_int):
+            return
+
+        await self.push_project_tasks(project_id_int)
+
     async def _serialize_tasks(self, project_id: int) -> list[dict]:
         """Fetch the latest tasks for a project and serialize them."""
 
@@ -116,6 +130,7 @@ class ConnectionManager:
 
 
 connection_manager = ConnectionManager()
+manager = connection_manager
 
 router = APIRouter()
 

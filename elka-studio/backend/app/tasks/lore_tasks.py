@@ -326,6 +326,7 @@ def uce_process_story_task(
     story_file_path: str | None = None,
     saga_theme: str | None = None,
     remaining_story_filenames: Optional[List[str]] | None = None,
+    parent_task_id: int | None = None,
 ) -> None:
     """Execute the Universe Consistency Engine pipeline.
 
@@ -338,6 +339,7 @@ def uce_process_story_task(
 
     manager = TaskManager()
     celery_task_id = self.request.id
+    _ = parent_task_id
 
     start_message = (
         f"Task {task_db_id}: starting Universe Consistency Engine run."
@@ -455,18 +457,20 @@ def uce_process_story_task(
         diff_preview_text = "\n".join(diff_preview)
 
         if not apply:
+            result_data = {
+                "diff_preview": diff_preview_text,
+                "summary": changeset.summary,
+                "files": [file.path for file in changeset.files],
+                "mode": "dry-run",
+            }
             manager.update_task_status(
                 celery_task_id,
                 TaskStatus.SUCCESS,
                 progress=80,
                 log_message="UCE dry-run completed.",
-                result={
-                    "diff_preview": diff_preview_text,
-                    "summary": changeset.summary,
-                    "files": [file.path for file in changeset.files],
-                    "mode": "dry-run",
-                },
+                result=result_data,
             )
+            manager.update_task_field(celery_task_id, "result", result_data)
             return
 
         git_adapter = app_context.create_git_adapter(project)
@@ -479,23 +483,25 @@ def uce_process_story_task(
         )
         git_adapter.push_branch(branch_name)
 
+        result_data = {
+            "branch": branch_name,
+            "base_branch": base_branch,
+            "commit_sha": commit_sha,
+            "diff_preview": diff_preview_text,
+            "summary": changeset.summary,
+            "files": [file.path for file in changeset.files],
+            "mode": "apply",
+            "approval_required": True,
+            "story_file_path": story_file_path,
+        }
         manager.update_task_status(
             celery_task_id,
             TaskStatus.SUCCESS,
             progress=100,
             log_message=f"UCE applied changes on {branch_name}, commit {commit_sha}",
-            result={
-                "branch": branch_name,
-                "base_branch": base_branch,
-                "commit_sha": commit_sha,
-                "diff_preview": diff_preview_text,
-                "summary": changeset.summary,
-                "files": [file.path for file in changeset.files],
-                "mode": "apply",
-                "approval_required": True,
-                "story_file_path": story_file_path,
-            },
+            result=result_data,
         )
+        manager.update_task_field(celery_task_id, "result", result_data)
 
         if remaining_story_filenames:
             next_story_filename = remaining_story_filenames[0]
@@ -514,6 +520,7 @@ def uce_process_story_task(
                     "story_file_path": next_story_filename,
                     "saga_theme": saga_theme,
                     "remaining_story_filenames": new_remaining_list,
+                    "parent_task_id": parent_task_id,
                 },
             )
     except Exception as exc:  # pragma: no cover - defensive logging
@@ -929,6 +936,7 @@ def generate_chapter_task(
     previous_chapter_content: str | None = None,
     pr_id: int | None = None,
     saga_theme: str | None = None,
+    parent_task_id: int | None = None,
 ) -> Dict[str, Any]:
     """Generate a single saga chapter and archive it in the repository."""
 
@@ -937,6 +945,7 @@ def generate_chapter_task(
     manager = TaskManager()
     celery_task_id = self.request.id
     tokens = {"input": 0, "output": 0}
+    _ = parent_task_id
 
     try:
         manager.update_task_status(
@@ -1054,6 +1063,12 @@ def generate_chapter_task(
         usage_increment = _accumulate_usage(usage_metadata, tokens)
         generated_body = generated_text.strip()
 
+        manager.update_task_field(
+            celery_task_id,
+            "story_content",
+            generated_body,
+        )
+
         story_directory = app_context.config.story_directory
         if saga_theme:
             saga_slug = _slugify(str(saga_theme)) or "saga"
@@ -1146,6 +1161,7 @@ def generate_saga_task(
     pr_id: int | None = None,
     story_title: str | None = None,
     story_author: str | None = None,
+    parent_task_id: int | None = None,
 ) -> None:
     """Plan a saga and sequentially generate each chapter."""
 
@@ -1162,6 +1178,7 @@ def generate_saga_task(
         project_id=project_id,
     )
     tokens = {"input": 0, "output": 0}
+    _ = parent_task_id
 
     manager.update_task_status(
         celery_task_id,
@@ -1225,7 +1242,16 @@ def generate_saga_task(
             planning_prompt,
             model_key=models.get("planning"),
         )
+        manager.update_task_field(
+            celery_task_id,
+            "saga_plan",
+            planner_response,
+        )
         planning_increment = _accumulate_usage(usage_metadata, tokens)
+        tokens = {
+            "input": planning_increment.get("input", 0),
+            "output": planning_increment.get("output", 0),
+        }
 
         outline_data = _extract_json_payload(planner_response)
         chapters_data = outline_data.get("chapters")
@@ -1290,6 +1316,7 @@ def generate_saga_task(
             }
             if pr_id is not None:
                 params["pr_id"] = pr_id
+            params["parent_task_id"] = task_db_id
 
             chapter_task = manager.create_task(
                 project_id=project.id,
@@ -1389,6 +1416,7 @@ def generate_saga_task(
                     "story_file_path": first_story,
                     "saga_theme": theme,
                     "remaining_story_filenames": remaining_stories,
+                    "parent_task_id": task_db_id,
                 },
             )
     except Exception as exc:  # pragma: no cover - defensive logging
