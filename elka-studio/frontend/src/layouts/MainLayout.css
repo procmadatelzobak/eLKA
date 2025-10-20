@@ -63,6 +63,36 @@
   overflow-y: auto;
 }
 
+.project-tabs {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.75rem;
+  margin-bottom: 1.5rem;
+  background-color: #fff;
+  border-radius: 999px;
+  padding: 0.4rem 0.6rem;
+  box-shadow: 0 10px 30px rgba(15, 23, 42, 0.08);
+}
+
+.project-tabs__link {
+  text-decoration: none;
+  color: #4b5563;
+  font-weight: 500;
+  padding: 0.45rem 1.25rem;
+  border-radius: 999px;
+  transition: background-color 0.2s ease, color 0.2s ease;
+}
+
+.project-tabs__link:hover {
+  background-color: rgba(249, 115, 22, 0.12);
+  color: #ea580c;
+}
+
+.project-tabs__link.active {
+  background-color: #f97316;
+  color: #fff;
+}
+
 @media (max-width: 960px) {
   .layout {
     grid-template-columns: 1fr;
@@ -81,5 +111,11 @@
 
   .content {
     padding: 1.5rem;
+  }
+
+  .project-tabs {
+    flex-wrap: wrap;
+    justify-content: center;
+    margin-bottom: 1rem;
   }
 }

@@ -6,11 +6,11 @@ import logging
 import os
 import shutil
 from pathlib import Path
-from typing import List, Optional
+from typing import Any, List, Optional, Tuple
 from urllib.parse import urlparse
 
 import git
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel, validator
 from sqlalchemy.orm import Session
 
@@ -210,6 +210,175 @@ def create_project(
     return project.to_dict()
 
 
+def _resolve_project_and_token(
+    project_id: int, session: Session = Depends(get_session)
+) -> Tuple[Project, str | None]:
+    project = session.get(Project, project_id)
+    if project is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Project not found"
+        )
+
+    token: str | None = None
+    if project.git_token:
+        try:
+            secret_key = get_secret_key()
+        except RuntimeError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=str(exc),
+            ) from exc
+        try:
+            token = decrypt(project.git_token, secret_key)
+        except Exception as exc:  # pragma: no cover - defensive branch
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"Failed to decrypt Git token: {exc}",
+            ) from exc
+
+    return project, token
+
+
+def _resolve_project(
+    project_id: int, session: Session = Depends(get_session)
+) -> Project:
+    project = session.get(Project, project_id)
+    if project is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Project not found"
+        )
+    return project
+
+
+def _build_file_tree(root: Path, current: Path | None = None) -> List[dict[str, Any]]:
+    base = current or root
+    entries: List[dict[str, Any]] = []
+    try:
+        candidates = sorted(
+            base.iterdir(), key=lambda path: (path.is_file(), path.name.lower())
+        )
+    except FileNotFoundError:
+        return []
+
+    for candidate in candidates:
+        if candidate.name == ".git":
+            continue
+
+        if candidate.is_dir():
+            children = _build_file_tree(root, candidate)
+            entries.append(
+                {
+                    "name": candidate.name,
+                    "type": "folder",
+                    "children": children,
+                }
+            )
+        elif candidate.is_file():
+            entries.append(
+                {
+                    "name": candidate.name,
+                    "type": "file",
+                    "path": str(candidate.relative_to(root)),
+                }
+            )
+
+    return entries
+
+
+@router.get(
+    "/{project_id}/universe-files",
+    summary="List files available in a project's universe",
+)
+def list_universe_files(
+    project_and_token: Tuple[Project, str | None] = Depends(_resolve_project_and_token),
+) -> List[dict[str, Any]]:
+    project, token = project_and_token
+
+    projects_dir = _resolve_projects_dir()
+    git_manager = GitManager(str(projects_dir))
+
+    try:
+        git_manager.sync_repo_hard(project, token)
+    except FileNotFoundError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=str(exc),
+        ) from exc
+    except RuntimeError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(exc),
+        ) from exc
+    except Exception as exc:  # pragma: no cover - network dependent
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to synchronise repository: {exc}",
+        ) from exc
+
+    try:
+        project_path = git_manager.resolve_project_path(project)
+    except FileNotFoundError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)
+        ) from exc
+
+    return _build_file_tree(project_path)
+
+
+@router.get(
+    "/{project_id}/file-content",
+    summary="Fetch the content of a file within a project",
+)
+def get_project_file_content(
+    project: Project = Depends(_resolve_project),
+    path: str = Query(..., description="Relative path to the requested file"),
+) -> dict[str, str]:
+    if not path:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="path query parameter must be provided",
+        )
+
+    relative_path = Path(path)
+    if relative_path.is_absolute() or any(part == ".." for part in relative_path.parts):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid file path",
+        )
+
+    projects_dir = _resolve_projects_dir()
+    git_manager = GitManager(str(projects_dir))
+
+    try:
+        project_path = git_manager.resolve_project_path(project)
+    except FileNotFoundError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)
+        ) from exc
+
+    full_path = project_path / relative_path
+    if not full_path.exists() or not full_path.is_file():
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Requested file does not exist",
+        )
+
+    try:
+        content = full_path.read_text(encoding="utf-8")
+    except UnicodeDecodeError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"File is not valid UTF-8 text: {exc}",
+        ) from exc
+    except OSError as exc:  # pragma: no cover - filesystem dependent
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to read file: {exc}",
+        ) from exc
+
+    return {"content": content}
+
+
 @router.post("/{project_id}/sync", summary="Synchronise a project's repository")
 def sync_project(project_id: int, session: Session = Depends(get_session)) -> dict:
     """Force the local repository to match the remote default branch."""
@@ -330,6 +499,8 @@ __all__ = [
     "list_projects",
     "get_project",
     "create_project",
+    "list_universe_files",
+    "get_project_file_content",
     "sync_project",
     "reset_project",
 ]

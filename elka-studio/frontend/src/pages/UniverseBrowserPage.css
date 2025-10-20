@@ -1,0 +1,167 @@
+.browser {
+  display: flex;
+  flex-direction: row;
+  gap: 2rem;
+  align-items: stretch;
+  min-height: 480px;
+}
+
+.browser__panel {
+  background-color: #ffffff;
+  border-radius: 1rem;
+  box-shadow: 0 25px 50px -12px rgba(15, 23, 42, 0.15);
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  overflow: hidden;
+}
+
+.browser__panel--tree {
+  flex: 0 0 320px;
+  max-width: 360px;
+}
+
+.browser__panel-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 1rem 1.25rem;
+  border-bottom: 1px solid rgba(15, 23, 42, 0.08);
+}
+
+.browser__panel-header h2 {
+  font-size: 1rem;
+  margin: 0;
+  color: #0f172a;
+}
+
+.browser__refresh {
+  background: linear-gradient(135deg, #f97316, #fb923c);
+  border: none;
+  border-radius: 999px;
+  color: #ffffff;
+  cursor: pointer;
+  font-weight: 600;
+  padding: 0.35rem 1rem;
+  transition: transform 0.2s ease, box-shadow 0.2s ease, opacity 0.2s ease;
+}
+
+.browser__refresh:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+  box-shadow: none;
+}
+
+.browser__refresh:not(:disabled):hover {
+  transform: translateY(-1px);
+  box-shadow: 0 10px 20px rgba(249, 115, 22, 0.25);
+}
+
+.browser__panel-body {
+  padding: 1rem 1.25rem 1.5rem;
+  overflow-y: auto;
+  flex: 1;
+}
+
+.browser__panel-body--content {
+  background-color: #0f172a;
+  color: #e2e8f0;
+}
+
+.browser__status {
+  margin: 0;
+  font-size: 0.95rem;
+  color: #475569;
+}
+
+.browser__status--error {
+  color: #dc2626;
+}
+
+.file-tree {
+  max-height: 100%;
+}
+
+.file-tree__list {
+  list-style: none;
+  margin: 0;
+  padding-left: 0;
+}
+
+.file-tree__item + .file-tree__item {
+  margin-top: 0.25rem;
+}
+
+.file-tree__list .file-tree__list {
+  margin-left: 1rem;
+  margin-top: 0.5rem;
+}
+
+.file-tree__button {
+  background: transparent;
+  border: none;
+  color: #1f2937;
+  cursor: pointer;
+  font-size: 0.95rem;
+  padding: 0.4rem 0.5rem;
+  text-align: left;
+  border-radius: 0.5rem;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  transition: background-color 0.2s ease, color 0.2s ease;
+  width: 100%;
+}
+
+.file-tree__button:focus {
+  outline: 2px solid rgba(249, 115, 22, 0.5);
+  outline-offset: 2px;
+}
+
+.file-tree__button--folder:hover {
+  background-color: rgba(251, 191, 36, 0.16);
+  color: #b45309;
+}
+
+.file-tree__button--folder.expanded {
+  background-color: rgba(249, 115, 22, 0.1);
+  color: #b45309;
+}
+
+.file-tree__button--file:hover {
+  background-color: rgba(59, 130, 246, 0.12);
+  color: #1d4ed8;
+}
+
+.file-tree__button--file.active {
+  background-color: rgba(59, 130, 246, 0.2);
+  color: #1e3a8a;
+  font-weight: 600;
+}
+
+.file-tree__icon {
+  display: inline-flex;
+  width: 1.5rem;
+  justify-content: center;
+}
+
+.browser__code {
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-family: 'JetBrains Mono', 'Fira Code', 'Menlo', monospace;
+  font-size: 0.9rem;
+  line-height: 1.5;
+  margin: 0;
+  background-color: transparent;
+}
+
+@media (max-width: 960px) {
+  .browser {
+    flex-direction: column;
+  }
+
+  .browser__panel--tree {
+    max-width: none;
+    flex: 1;
+  }
+}

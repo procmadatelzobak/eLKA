@@ -2,6 +2,7 @@ import { Route, Routes } from 'react-router-dom';
 import MainLayout from './layouts/MainLayout';
 import ProjectsPage from './pages/ProjectsPage';
 import ProjectDashboardPage from './pages/ProjectDashboardPage';
+import UniverseBrowserPage from './pages/UniverseBrowserPage';
 import SettingsPage from './pages/SettingsPage';
 import './App.css';
 
@@ -10,6 +11,7 @@ const App = () => (
     <Route path="/" element={<MainLayout />}>
       <Route index element={<ProjectsPage />} />
       <Route path="projects/:projectId" element={<ProjectDashboardPage />} />
+      <Route path="projects/:projectId/browse" element={<UniverseBrowserPage />} />
       <Route path="settings" element={<SettingsPage />} />
     </Route>
   </Routes>
