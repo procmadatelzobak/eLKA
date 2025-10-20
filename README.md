@@ -7,6 +7,7 @@ eLKA Studio is a full-stack application for building and managing fictional univ
 - **Project management dashboard** – Create, organize, and synchronize projects across local and remote Git repositories.
 - **Real-time task queue** – Monitor Celery jobs through Redis-backed WebSockets for immediate progress updates.
 - **Hierarchical task explorer** – Review parent and child jobs together, including saga plans and generated chapter stories directly within the dashboard.
+- **Persistent saga context** – Backend workers now write saga outlines, chapter prose, and Universe Consistency Engine file manifests straight into task records for immediate UI previews.
 - **Inline story previews** – Open generated stories and processed files directly from the task queue without leaving the dashboard.
 - **Collapsible task controls** – Submit saga, story, and processing jobs from grouped, collapsible forms with expanded saga theme inputs.
 - **Story & saga generation** – Launch AI-assisted generation pipelines for single stories or multi-chapter sagas.
