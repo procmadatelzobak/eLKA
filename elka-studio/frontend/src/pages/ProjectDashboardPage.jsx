@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useParams } from 'react-router-dom';
 import TaskSocket from '../services/websocket';
+import TaskItem from '../components/TaskItem';
 import { createTask, deleteTask, fetchProject, pauseTask, resetProject, resumeTask, syncProject } from '../services/api';
 import ProjectSettings from './ProjectSettings';
 import './ProjectDashboardPage.css';
@@ -112,6 +113,11 @@ const ProjectDashboardPage = () => {
       return secondDate - firstDate;
     });
   }, [tasks]);
+
+  const topLevelTasks = useMemo(
+    () => sortedTasks.filter((task) => !task.parent_task_id),
+    [sortedTasks],
+  );
 
   const headingProjectName = projectName || projectDetails?.name || 'Loading…';
   const resolvedProjectName = projectName || projectDetails?.name || `Project #${projectId}`;
@@ -625,118 +631,21 @@ const ProjectDashboardPage = () => {
             </div>
           ) : (
             <div className="task-queue__list">
-              {sortedTasks.map((task) => {
-                const progressValue = getProgressValue(task);
-                const expanded = isTaskExpanded(task.id);
-                const storyText = typeof task?.result?.story === 'string' ? task.result.story.trim() : '';
-                const files = task?.result?.files;
-                const hasStory = storyText.length > 0;
-                const hasFiles = files && Object.keys(files).length > 0;
-                const formatTokens = (value) =>
-                  typeof value === 'number' && Number.isFinite(value) ? value.toLocaleString('en-US') : '0';
-                const inputTokensDisplay = formatTokens(task?.input_tokens ?? task?.total_input_tokens);
-                const outputTokensDisplay = formatTokens(task?.output_tokens ?? task?.total_output_tokens);
-                const normalizedStatus = typeof task?.status === 'string' ? task.status.toLowerCase() : 'unknown';
-                const showTokenSummary = task?.input_tokens != null || task?.output_tokens != null;
-
-                return (
-                  <article key={task.id} className="task-card">
-                    <header className="task-card__header">
-                      <div>
-                        <h3 className="task-card__title">
-                          {task.type || 'Unknown type'} <span className="task-card__id">#{task.id}</span>
-                        </h3>
-                        <div className="task-card__status">
-                          <span className={`task-status-badge status-${normalizedStatus}`}>
-                            {task.status || 'Unknown status'}
-                          </span>
-                        </div>
-                        <div className="task-card__tokens">
-                          <span>Input: {inputTokensDisplay}</span>
-                          <span>Output: {outputTokensDisplay}</span>
-                          {showTokenSummary && (
-                            <span className="task-card__token-summary">
-                              Tokeny: {inputTokensDisplay} (vstup) / {outputTokensDisplay} (výstup)
-                            </span>
-                          )}
-                        </div>
-                        {task?.error && <div className="task-error">{task.error}</div>}
-                      </div>
-                      <div className="task-card__actions">
-                        <button
-                          type="button"
-                          className="task-card__action"
-                          onClick={() => handleTaskAction(task.id, 'pause')}
-                          disabled={isPendingAction(task.id, 'pause')}
-                        >
-                          {isPendingAction(task.id, 'pause') ? 'Pausing…' : 'Pause'}
-                        </button>
-                        <button
-                          type="button"
-                          className="task-card__action"
-                          onClick={() => handleTaskAction(task.id, 'resume')}
-                          disabled={isPendingAction(task.id, 'resume')}
-                        >
-                          {isPendingAction(task.id, 'resume') ? 'Resuming…' : 'Resume'}
-                        </button>
-                        <button
-                          type="button"
-                          className="task-card__action task-card__action--ghost"
-                          onClick={() => handleDeleteTask(task.id)}
-                          disabled={isPendingAction(task.id, 'delete')}
-                        >
-                          {isPendingAction(task.id, 'delete') ? 'Deleting…' : 'Delete'}
-                        </button>
-                      </div>
-                    </header>
-
-                    <div className="task-card__progress" role="progressbar" aria-valuenow={progressValue} aria-valuemin="0" aria-valuemax="100">
-                      <div className="task-card__progress-bar" style={{ width: `${progressValue}%` }} />
-                    </div>
-
-                    <div className="task-card__footer">
-                      <span className="task-card__progress-value">{progressValue}%</span>
-                      <button
-                        type="button"
-                        className="task-card__toggle"
-                        onClick={() => toggleTaskExpansion(task.id)}
-                        aria-expanded={expanded}
-                      >
-                        {expanded ? 'Hide log' : 'Show log'}
-                      </button>
-                    </div>
-
-                    {(hasStory || hasFiles) && (
-                      <div className="task-card__details">
-                        {hasStory && (
-                          <button
-                            type="button"
-                            className="task-card__detail-action"
-                            onClick={() => openStoryModal(task)}
-                          >
-                            Show story
-                          </button>
-                        )}
-                        {hasFiles && (
-                          <button
-                            type="button"
-                            className="task-card__detail-action"
-                            onClick={() => openFilesModal(task)}
-                          >
-                            Show files
-                          </button>
-                        )}
-                      </div>
-                    )}
-
-                    {expanded && (
-                      <div className="task-card__log">
-                        {task.log ? <pre>{task.log}</pre> : <p className="task-card__log-placeholder">Log is not available yet.</p>}
-                      </div>
-                    )}
-                  </article>
-                );
-              })}
+              {topLevelTasks.map((task) => (
+                <TaskItem
+                  key={task.id}
+                  task={task}
+                  allTasks={sortedTasks}
+                  isTaskExpanded={isTaskExpanded}
+                  toggleTaskExpansion={toggleTaskExpansion}
+                  getProgressValue={getProgressValue}
+                  handleTaskAction={handleTaskAction}
+                  handleDeleteTask={handleDeleteTask}
+                  isPendingAction={isPendingAction}
+                  openStoryModal={openStoryModal}
+                  openFilesModal={openFilesModal}
+                />
+              ))}
             </div>
           )}
           <p className="task-queue__note">

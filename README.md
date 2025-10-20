@@ -6,6 +6,7 @@ eLKA Studio is a full-stack application for building and managing fictional univ
 ## Features
 - **Project management dashboard** – Create, organize, and synchronize projects across local and remote Git repositories.
 - **Real-time task queue** – Monitor Celery jobs through Redis-backed WebSockets for immediate progress updates.
+- **Hierarchical task explorer** – Review parent and child jobs together, including saga plans and generated chapter stories directly within the dashboard.
 - **Inline story previews** – Open generated stories and processed files directly from the task queue without leaving the dashboard.
 - **Collapsible task controls** – Submit saga, story, and processing jobs from grouped, collapsible forms with expanded saga theme inputs.
 - **Story & saga generation** – Launch AI-assisted generation pipelines for single stories or multi-chapter sagas.
@@ -156,7 +157,7 @@ Run `bash scripts/update.sh` (or `make setup` again) to pull the latest code and
 ## Troubleshooting
 - **Redis connection errors**: Ensure Redis is available locally or via Docker. Use `make stop` to clean up the development container.
 - **Backend fails to start**: Confirm that `backend/venv` exists and that `config.yml` contains valid values (especially `security.secret_key`). If the virtual environment becomes corrupted or is missing activation scripts, rerun `make setup` so the installer can recreate it automatically.
-- **Legacy SQLite schema**: Older installations might miss recently added columns (for example `tasks.parent_task_id`). The backend now inspects the database on startup and adds any missing nullable columns automatically. Restart the server after pulling new code to let the synchronisation run; no manual migration is required for default setups.
+- **Legacy SQLite schema**: Older installations might miss recently added columns (for example `tasks.parent_task_id`, `tasks.saga_plan`, `tasks.story_content`). The backend now inspects the database on startup and adds any missing nullable columns automatically. Restart the server after pulling new code to let the synchronisation run; no manual migration is required for default setups.
 - **Credential helper path issues**: When running the backend from directories containing spaces, ensure you pull the latest build. The Git helpers now wrap the credential helper path in quotes so that `git clone` and `git push` succeed regardless of workspace naming.
 - **Failed universe reset with `GIT_CONFIG_PARAMETERS`**: Earlier builds surfaced `error: bogus format in GIT_CONFIG_PARAMETERS` when the dashboard's **Reset Universe** action pushed the scaffold. The backend now relies on `GIT_CREDENTIAL_HELPER`, eliminating the misformatted environment override. Update to the latest version if you still encounter this message.
 - **ModuleNotFoundError during `make run-dev`**: The helper script now checks for critical backend modules (such as `limits`) and reinstalls `backend/requirements.txt` automatically if they are missing. If errors persist, remove `backend/venv` and run `make setup` to recreate the environment from scratch.
