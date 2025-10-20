@@ -16,6 +16,7 @@ eLKA Studio is a full-stack application for building and managing fictional univ
 - **Universe reset tooling** – Instantly wipe lore files and restore the default scaffold to start fresh tests or story arcs.
 - **Full-context story pipeline** – A single task loads the entire universe, generates consistent lore, archives entities, and updates the timeline automatically.
 - **Manual story processing** – Submit existing stories for validation, extraction, and archival directly from the dashboard.
+- **Universe browser** – Explore repository directories and preview Markdown or text files through a dedicated read-only viewer.
 - **Objects entity archival** – Persist extracted characters, locations, and events into `.txt` files inside the `Objects/` structure used by AI Universe projects.
 - **Story metadata front matter** – Generated manuscripts now begin with YAML metadata containing the title, author, originating seed, and UTC timestamp for downstream tooling.
 - **Universe Consistency Engine** – Extract facts, verify canon conflicts, and propose Git-ready updates.
@@ -136,6 +137,7 @@ All changes pushed to or proposed against the `main` branch trigger the **Backen
 - Approve task results with `POST /api/tasks/{task_id}/approve`. The endpoint sets `result_approved = true`, commits the recorded files to the main branch (for example `main`), and returns the resulting SHA in `result.commit_sha`.
 - Reset a universe instantly through `POST /api/projects/{project_id}/reset`. The backend deletes lore directories (Stories/Legends/Objects) and timeline files, commits the wipe, and reinstalls the default scaffold before force-pushing the scaffold back to the remote default branch.
 - Force-refresh a repository with `POST /api/projects/{project_id}/sync`. The endpoint performs `git fetch` followed by `git reset --hard origin/<default_branch>` (including credential helper support) and powers the dashboard's **Synchronise with Server** button. Task submissions call the same routine before enqueuing work, so saga and story jobs always start from the latest remote state and recompute token estimates against fresh lore.
+- Browse repository contents with `GET /api/projects/{project_id}/universe-files`, which performs a hard sync before returning a tree of folders and files (excluding `.git`). Pair it with `GET /api/projects/{project_id}/file-content?path=…` to read UTF-8 files safely through the UI.
 - When a project stores an encrypted Git token, Celery tasks decrypt it and use a credential helper during `git push`, preventing repeated interactive GitHub login prompts during story processing or saga generation.
 - Celery workers share a singleton application context (`backend/app/core/context.py`) that bootstraps configuration, AI adapters, Git helpers, and validation/archival services once per worker. Task payloads must include the `project_id` (and optionally `pr_id`) so the worker can retrieve the correct repository without reinitializing the FastAPI stack for every job.
 

@@ -65,4 +65,19 @@ export const fetchProjectAiModels = async (projectId) => {
 export const updateProjectAiModels = (projectId, payload) =>
   getApiClient().put(`/projects/${projectId}/settings/ai-models`, payload);
 
+export const fetchUniverseFiles = async (projectId) => {
+  const response = await getApiClient().get(`/projects/${projectId}/universe-files`);
+  return response.data;
+};
+
+export const fetchUniverseFileContent = async (projectId, path) => {
+  const response = await getApiClient().get(
+    `/projects/${projectId}/file-content`,
+    {
+      params: { path },
+    },
+  );
+  return response.data;
+};
+
 export default getApiClient;
