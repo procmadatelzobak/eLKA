@@ -17,6 +17,7 @@ eLKA Studio is a full-stack application for building and managing fictional univ
 - **Full-context story pipeline** – A single task loads the entire universe, generates consistent lore, archives entities, and updates the timeline automatically.
 - **Manual story processing** – Submit existing stories for validation, extraction, and archival directly from the dashboard.
 - **Universe browser** – Explore repository directories and preview Markdown or text files through a dedicated read-only viewer.
+- **Text-to-speech previews** – Listen to Universe Browser file contents using integrated Web Speech controls.
 - **Objects entity archival** – Persist extracted characters, locations, and events into `.txt` files inside the `Objects/` structure used by AI Universe projects.
 - **Story metadata front matter** – Generated manuscripts now begin with YAML metadata containing the title, author, originating seed, and UTC timestamp for downstream tooling.
 - **Universe Consistency Engine** – Extract facts, verify canon conflicts, and propose Git-ready updates.
