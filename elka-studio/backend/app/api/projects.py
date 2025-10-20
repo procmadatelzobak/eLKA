@@ -16,7 +16,8 @@ from sqlalchemy.orm import Session
 
 from ..db.session import get_session
 from ..models.project import Project
-from ..services import GitManager
+from ..models.task import Task
+from ..services.git_manager import GitManager
 from ..utils.config import load_config
 from ..utils.security import decrypt, encrypt, get_secret_key
 
@@ -436,49 +437,56 @@ def sync_project(project_id: int, session: Session = Depends(get_session)) -> di
     return {"detail": "Repository synchronised successfully."}
 
 
-@router.post("/{project_id}/reset", summary="Reset a project to the scaffold state")
-def reset_project(project_id: int, session: Session = Depends(get_session)) -> dict:
+@router.post("/{project_id}/reset", summary="Reset a project's universe to default scaffold")
+def reset_project_universe(
+    project_id: int, session: Session = Depends(get_session)
+) -> dict:
+    """Reset the project repository and delete all associated tasks."""
+
     project = session.get(Project, project_id)
     if project is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail="Project not found"
         )
+    if not project.local_path:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Project has no local repository path",
+        )
+
+    local_path = Path(project.local_path)
+    git_manager = GitManager(str(local_path.parent))
 
     try:
         secret_key = get_secret_key()
-    except RuntimeError as exc:
+        token = decrypt(project.git_token, secret_key) if project.git_token else None
+    except Exception as exc:
+        logger.exception("Failed to decrypt token for project reset")
         raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(exc)
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to decrypt token: {exc}",
         ) from exc
-
-    decrypted_token: str | None = None
-    if project.git_token:
-        try:
-            decrypted_token = decrypt(project.git_token, secret_key)
-        except Exception as exc:  # pragma: no cover - defensive branch
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail=f"Failed to decrypt Git token: {exc}",
-            ) from exc
-
-    projects_dir = _resolve_projects_dir()
-    git_manager = GitManager(str(projects_dir))
 
     try:
-        git_manager.reset_universe(project, decrypted_token)
-    except FileNotFoundError as exc:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=str(exc),
-        ) from exc
-    except Exception as exc:  # pragma: no cover - IO/network dependent
+        git_manager.reset_universe(project, token)
+
+        tasks_to_delete = session.query(Task).filter(Task.project_id == project_id)
+        tasks_to_delete.delete(synchronize_session=False)
+        session.commit()
+
+        return {
+            "message": "Project universe reset and all tasks cleared successfully."
+        }
+
+    except Exception as exc:
+        session.rollback()
+        logger.exception(
+            "Failed to reset project universe for project %s", project_id
+        )
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to reset project universe: {exc}",
         ) from exc
-
-    session.refresh(project)
-    return project.to_dict()
 
 
 def _resolve_projects_dir() -> Path:
@@ -502,5 +510,5 @@ __all__ = [
     "list_universe_files",
     "get_project_file_content",
     "sync_project",
-    "reset_project",
+    "reset_project_universe",
 ]
