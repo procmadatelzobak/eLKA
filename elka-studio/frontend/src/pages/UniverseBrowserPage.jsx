@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useParams } from 'react-router-dom';
 import {
   fetchUniverseFileContent,
@@ -16,6 +16,15 @@ const UniverseBrowserPage = () => {
   const [selectedFileContent, setSelectedFileContent] = useState('');
   const [isContentLoading, setIsContentLoading] = useState(false);
   const [contentError, setContentError] = useState(null);
+  const [isPlaying, setIsPlaying] = useState(false);
+  const [isPaused, setIsPaused] = useState(false);
+  const utteranceRef = useRef(null);
+  const speechSynthesis =
+    typeof window !== 'undefined' && 'speechSynthesis' in window ? window.speechSynthesis : null;
+  const SpeechSynthesisUtteranceConstructor =
+    typeof window !== 'undefined' && 'SpeechSynthesisUtterance' in window
+      ? window.SpeechSynthesisUtterance
+      : null;
 
   const normalisedProjectId = useMemo(() => projectId ?? '', [projectId]);
 
@@ -86,6 +95,85 @@ const UniverseBrowserPage = () => {
     },
     [loadFileContent],
   );
+
+  const handlePlay = useCallback(() => {
+    if (!speechSynthesis || !SpeechSynthesisUtteranceConstructor) {
+      console.warn('SpeechSynthesis API is not available in this browser.');
+      return;
+    }
+
+    if (isPaused && utteranceRef.current) {
+      speechSynthesis.resume();
+      setIsPlaying(true);
+      setIsPaused(false);
+    } else if (selectedFileContent) {
+      const utterance = new SpeechSynthesisUtteranceConstructor(selectedFileContent);
+      utterance.lang = 'cs-CZ';
+
+      utterance.onend = () => {
+        setIsPlaying(false);
+        setIsPaused(false);
+        utteranceRef.current = null;
+      };
+
+      utterance.onerror = () => {
+        console.error('SpeechSynthesis error');
+        setIsPlaying(false);
+        setIsPaused(false);
+        utteranceRef.current = null;
+      };
+
+      utteranceRef.current = utterance;
+      speechSynthesis.cancel();
+      speechSynthesis.speak(utterance);
+      setIsPlaying(true);
+      setIsPaused(false);
+    }
+  }, [SpeechSynthesisUtteranceConstructor, isPaused, selectedFileContent, speechSynthesis]);
+
+  const handlePause = useCallback(() => {
+    if (!speechSynthesis) {
+      return;
+    }
+
+    if (speechSynthesis.speaking) {
+      speechSynthesis.pause();
+      setIsPlaying(false);
+      setIsPaused(true);
+    }
+  }, [speechSynthesis]);
+
+  const handleStop = useCallback(() => {
+    if (!speechSynthesis) {
+      return;
+    }
+
+    speechSynthesis.cancel();
+    setIsPlaying(false);
+    setIsPaused(false);
+    utteranceRef.current = null;
+  }, [speechSynthesis]);
+
+  useEffect(() => {
+    if (!speechSynthesis) {
+      return undefined;
+    }
+
+    return () => {
+      speechSynthesis.cancel();
+    };
+  }, [speechSynthesis]);
+
+  useEffect(() => {
+    if (!speechSynthesis) {
+      return;
+    }
+
+    speechSynthesis.cancel();
+    setIsPlaying(false);
+    setIsPaused(false);
+    utteranceRef.current = null;
+  }, [selectedFileContent, speechSynthesis]);
 
   const renderTree = useCallback(
     (nodes, parentPath = '') => {
@@ -179,9 +267,31 @@ const UniverseBrowserPage = () => {
           ) : contentError ? (
             <p className="browser__status browser__status--error">{contentError}</p>
           ) : selectedFilePath ? (
-            <pre className="browser__code" tabIndex={0}>
-              {selectedFileContent || 'The file is empty.'}
-            </pre>
+            <>
+              {selectedFileContent ? (
+                <div className="tts-controls">
+                  {!isPlaying ? (
+                    <button type="button" onClick={handlePlay}>
+                      Přehrát
+                    </button>
+                  ) : (
+                    <button type="button" onClick={handlePause}>
+                      Pauza
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    onClick={handleStop}
+                    disabled={!isPlaying && !isPaused}
+                  >
+                    Stop
+                  </button>
+                </div>
+              ) : null}
+              <pre className="browser__code" tabIndex={0}>
+                {selectedFileContent || 'The file is empty.'}
+              </pre>
+            </>
           ) : (
             <p className="browser__status">Choose a file from the tree to view its contents.</p>
           )}
