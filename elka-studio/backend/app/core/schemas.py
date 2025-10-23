@@ -5,27 +5,56 @@ from __future__ import annotations
 from enum import Enum
 from typing import Dict, List, Literal, Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class FactEntity(BaseModel):
     """Representation of an entity discovered within a story."""
 
+    model_config = ConfigDict(populate_by_name=True)
+
     id: str = Field(..., description="Stable identifier for the entity")
     type: Literal[
+        "Character",
+        "Location",
+        "Event",
+        "Concept",
+        "Item",
+        "Misc",
+        "Organization",
+        "Material",
         "person",
         "place",
         "artifact",
         "organization",
         "concept",
+        "material",
         "event",
         "other",
-    ]
-    labels: List[str] = Field(default_factory=list, description="Alternative names")
-    summary: Optional[str] = Field(default=None, description="Short description")
-    attributes: Dict[str, str] = Field(
-        default_factory=dict, description="Key-value facts"
+    ] = Field(..., description="Categorised entity type")
+    name: Optional[str] = Field(
+        default=None, description="Primary human-readable name for the entity"
     )
+    summary: Optional[str] = Field(default=None, description="Short description")
+    description: Optional[str] = Field(
+        default=None, description="Detailed Markdown description"
+    )
+    aliases: List[str] = Field(
+        default_factory=list,
+        alias="labels",
+        description="Alternative names and identifiers",
+    )
+    relationships: Dict[str, str] = Field(
+        default_factory=dict,
+        description="Relationships to other entities keyed by identifier",
+    )
+    attributes: Dict[str, str] = Field(
+        default_factory=dict, description="Key-value facts and metadata"
+    )
+
+    @property
+    def labels(self) -> List[str]:  # pragma: no cover - compatibility shim
+        return self.aliases
 
 
 class FactEvent(BaseModel):

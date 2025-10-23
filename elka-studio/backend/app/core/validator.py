@@ -351,8 +351,13 @@ def _load_canonical_truths(existing: Iterable[str]) -> List[str]:
 
     truths = [truth.strip() for truth in existing if truth and truth.strip()]
 
-    template_truths_path = TEMPLATES_ROOT / "Legends" / "CORE_TRUTHS.md"
-    if template_truths_path.is_file():
+    template_candidates = [
+        TEMPLATES_ROOT / "Canon" / "CoreTruths.md",
+        TEMPLATES_ROOT / "Legends" / "CORE_TRUTHS.md",
+    ]
+    for template_truths_path in template_candidates:
+        if not template_truths_path.is_file():
+            continue
         try:
             for line in template_truths_path.read_text(encoding="utf-8").splitlines():
                 cleaned = line.strip()
@@ -366,7 +371,7 @@ def _load_canonical_truths(existing: Iterable[str]) -> List[str]:
                     if value:
                         truths.append(value)
         except OSError:  # pragma: no cover - filesystem edge
-            pass
+            continue
 
     # Preserve order but deduplicate deterministically.
     seen: Set[str] = set()
