@@ -4,6 +4,7 @@ fastapi
 GitPython
 python-dotenv
 pyyaml
+python-frontmatter
 redis
 limits
 sqlalchemy

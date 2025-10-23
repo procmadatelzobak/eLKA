@@ -32,6 +32,8 @@ eLKA Studio combines a FastAPI backend, a Celery worker layer, and a React/Vite 
 
 ## Universe Data Format
 
+eLKA Studio now parses entity YAML Front Matter with [python-frontmatter](https://github.com/eyeseast/python-frontmatter), so entity files can live in nested `Entities/` subdirectories as long as their metadata remains valid.
+
 eLKA Studio uses a standardized format for storing universe data within Git repositories. This format utilizes Markdown files with YAML Front Matter for structured metadata.
 
 For the detailed specification, please see the [**eLKA Universe Data Standard (UNIVERSE_FORMAT.md)**](UNIVERSE_FORMAT.md).
