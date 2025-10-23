@@ -4,7 +4,7 @@ import logging
 import os
 import re
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from typing import Any, Dict
 
@@ -29,12 +29,15 @@ class GeminiAdapter(BaseAIAdapter):
 
     config: Config
     model: str
+    logger: logging.Logger = field(init=False, repr=False)
 
     def __post_init__(self) -> None:
         BaseAIAdapter.__init__(self, self.config)
         api_key = self.config.get_gemini_api_key()
         if not api_key:
             raise RuntimeError("GEMINI_API_KEY is not configured")
+        self.logger = logging.getLogger(f"{__name__}.{self.__class__.__name__}")
+        self.logger.setLevel(logging.DEBUG)
         self._client = genai.Client(api_key=api_key)
         self._model_aliases = self.config.get_ai_model_aliases()
         self._rate_limit_rpm = self.config.gemini_rate_limit_rpm()
@@ -267,6 +270,16 @@ class GeminiAdapter(BaseAIAdapter):
             )
             raise
         try:
+            self.logger.debug(f"Attempting to parse cleaned JSON: '{text}'")
+            if not text:
+                self.logger.error(
+                    "CRITICAL: Cleaned JSON string is empty before parsing!"
+                )
+            elif not (text.startswith("{") or text.startswith("[")):
+                self.logger.error(
+                    "CRITICAL: Cleaned JSON string does not start with '{' or '['. Starts with: '%s'",
+                    text[:20],
+                )
             json.loads(text)
         except json.JSONDecodeError as exc:
             error_message = f"Failed to decode JSON from Gemini: {text}"
