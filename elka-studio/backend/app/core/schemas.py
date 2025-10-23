@@ -11,28 +11,21 @@ from pydantic import BaseModel, ConfigDict, Field
 class FactEntity(BaseModel):
     """Representation of an entity discovered within a story."""
 
-    model_config = ConfigDict(populate_by_name=True)
+    model_config = ConfigDict(populate_by_name=True, from_attributes=True)
 
     id: str = Field(..., description="Stable identifier for the entity")
-    type: Literal[
-        "Character",
-        "Location",
-        "Event",
-        "Concept",
-        "Item",
-        "Misc",
-    ] = Field(..., description="Categorised entity type")
+    type: str = Field(..., description="Categorised entity type")
     name: str = Field(..., description="Primary human-readable name for the entity")
     description: Optional[str] = Field(
         default=None, description="Detailed Markdown description"
     )
-    aliases: List[str] = Field(
-        default_factory=list,
+    aliases: Optional[List[str]] = Field(
+        default=None,
         description="Alternative names and identifiers",
     )
     summary: Optional[str] = Field(default=None, description="Short description")
-    relationships: Dict[str, Any] = Field(
-        default_factory=dict,
+    relationships: Optional[Dict[str, Any]] = Field(
+        default=None,
         description="Relationships to other entities keyed by name",
     )
     attributes: Dict[str, Any] = Field(
