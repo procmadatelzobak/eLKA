@@ -316,22 +316,31 @@ class ExtractorEngine:
 
         raise RuntimeError("AI adapter does not support JSON extraction.")
 
-    def _prepare_string_result(self, payload: str) -> str:
-        cleaned = payload.strip()
-        if not cleaned or cleaned in {"```", "```json"}:
-            raise ValueError("Received incomplete or empty JSON response from extractor")
+    @staticmethod
+    def _clean_json_response(raw_response: str) -> str:
+        """
+        Cleans the raw response from the AI model to extract the JSON part.
+        Removes markdown code blocks (```json ... ```) and leading/trailing whitespace.
+        """
 
-        if cleaned.startswith("```"):
-            lines = cleaned.splitlines()
-            if lines and lines[0].startswith("```"):
-                lines = lines[1:]
-            if lines and lines[-1].startswith("```"):
-                lines = lines[:-1]
-            cleaned = "\n".join(lines).strip()
-            if not cleaned:
-                raise ValueError(
-                    "Received empty JSON payload after removing code fences"
-                )
+        if not raw_response:
+            return ""
+
+        match = re.search(r"```(?:json)?\s*([\s\S]*?)\s*```", raw_response, re.DOTALL)
+
+        if match:
+            cleaned_json = match.group(1).strip()
+        else:
+            cleaned_json = raw_response.strip()
+            cleaned_json = re.sub(r"^[^{[]*", "", cleaned_json)
+            cleaned_json = re.sub(r"[^}\]]*$", "", cleaned_json)
+
+        return cleaned_json.strip()
+
+    def _prepare_string_result(self, payload: str) -> str:
+        cleaned = self._clean_json_response(payload)
+        if not cleaned:
+            raise ValueError("Received incomplete or empty JSON response from extractor")
 
         return cleaned
 
