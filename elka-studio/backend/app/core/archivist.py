@@ -9,7 +9,17 @@ from datetime import datetime
 from pathlib import Path
 from typing import Dict, Iterable, List, Optional, Tuple, Union
 
+import frontmatter
 import yaml
+from pydantic import ValidationError
+
+try:
+    from frontmatter import FrontmatterError
+except ImportError:  # pragma: no cover - fallback
+    class FrontmatterError(Exception):
+        """Fallback error when python-frontmatter is unavailable."""
+
+        pass
 
 from app.adapters.ai.base import BaseAIAdapter
 from app.adapters.git.base import GitAdapter
@@ -797,42 +807,72 @@ def load_universe(repo_path: Path) -> FactGraph:
 
     entities_dir = repo_path / "Entities"
     if entities_dir.is_dir():
-        for path in sorted(entities_dir.glob("*/*.md")):
+        entity_paths = sorted(entities_dir.rglob('*.md'))
+        for path in entity_paths:
             if not path.is_file():
                 continue
-            text = path.read_text(encoding="utf-8")
-            front_matter = _parse_front_matter(text)
-            body = _extract_markdown_body(text)
+            try:
+                post = frontmatter.load(path)
+            except (yaml.YAMLError, FrontmatterError) as exc:
+                logger.warning('Failed to parse entity front matter %s: %s', path, exc)
+                continue
+            except OSError as exc:
+                logger.warning('Failed to read entity file %s: %s', path, exc)
+                continue
 
-            raw_id = front_matter.get("id") if isinstance(front_matter, dict) else None
-            entity_id = str(raw_id or path.stem)
+            metadata = post.metadata or {}
+            if not isinstance(metadata, dict):
+                metadata = {}
 
-            raw_type = front_matter.get("type") if isinstance(front_matter, dict) else None
-            type_key = str(raw_type or path.parent.name).strip().lower()
-            _, canonical_type = _ENTITY_DIRECTORY_MAP.get(type_key, (path.parent.name, str(raw_type or path.parent.name)))
+            missing_fields = [
+                key
+                for key in ('id', 'type', 'name')
+                if key not in metadata or not str(metadata.get(key) or '').strip()
+            ]
+            if missing_fields:
+                logger.warning(
+                    'Skipping entity file %s due to missing fields: %s',
+                    path,
+                    ', '.join(missing_fields),
+                )
+                continue
 
-            raw_aliases = []
-            if isinstance(front_matter, dict):
-                if isinstance(front_matter.get("aliases"), list):
-                    raw_aliases = front_matter.get("aliases", [])
-                elif front_matter.get("aliases"):
-                    raw_aliases = [front_matter.get("aliases")]
-                elif isinstance(front_matter.get("labels"), list):
-                    raw_aliases = front_matter.get("labels", [])
-                elif front_matter.get("labels"):
-                    raw_aliases = [front_matter.get("labels")]
+            entity_id = str(metadata.get('id')).strip()
+            raw_type = metadata.get('type')
+            type_key = str(raw_type or '').strip().lower()
 
+            try:
+                relative_path = path.relative_to(entities_dir)
+                if len(relative_path.parts) > 1:
+                    directory_hint = relative_path.parts[0]
+                else:
+                    directory_hint = path.parent.name
+            except ValueError:
+                directory_hint = path.parent.name
+
+            directory_hint = str(directory_hint)
+            if not type_key:
+                type_key = directory_hint.strip().lower()
+
+            canonical_type = _ENTITY_DIRECTORY_MAP.get(
+                type_key,
+                (directory_hint, str(raw_type or directory_hint)),
+            )[1]
+
+            raw_aliases = metadata.get('aliases', [])
+            if isinstance(raw_aliases, list):
+                alias_candidates = raw_aliases
+            elif raw_aliases:
+                alias_candidates = [raw_aliases]
+            else:
+                alias_candidates = []
             aliases = [
                 str(alias).strip()
-                for alias in raw_aliases
+                for alias in alias_candidates
                 if str(alias).strip()
             ]
 
-            relationships_raw = (
-                front_matter.get("relationships")
-                if isinstance(front_matter, dict)
-                else {}
-            )
+            relationships_raw = metadata.get('relationships', {})
             if not isinstance(relationships_raw, dict):
                 relationships_raw = {}
             relationships = {
@@ -841,66 +881,56 @@ def load_universe(repo_path: Path) -> FactGraph:
                 if str(key).strip()
             }
 
-            attributes_raw = (
-                front_matter.get("attributes")
-                if isinstance(front_matter, dict)
-                else {}
-            )
+            attributes_raw = metadata.get('attributes', {})
             if not isinstance(attributes_raw, dict):
                 attributes_raw = {}
 
             additional_fields: dict[str, object] = {}
-            if isinstance(front_matter, dict):
-                for key, value in front_matter.items():
-                    if key in {
-                        "id",
-                        "type",
-                        "name",
-                        "aliases",
-                        "labels",
-                        "summary",
-                        "description",
-                        "relationships",
-                        "attributes",
-                    }:
-                        continue
-                    additional_fields[str(key)] = value
+            for key, value in metadata.items():
+                if key in {
+                    'id',
+                    'type',
+                    'name',
+                    'aliases',
+                    'summary',
+                    'description',
+                    'relationships',
+                    'attributes',
+                }:
+                    continue
+                additional_fields[str(key)] = value
 
             if additional_fields:
                 attributes_raw = {**attributes_raw, **additional_fields}
 
-            attributes_clean = {
-                str(key): value for key, value in attributes_raw.items()
-            }
+            attributes_clean = {str(key): value for key, value in attributes_raw.items()}
 
             summary = None
-            if isinstance(front_matter, dict):
-                raw_summary = front_matter.get("summary")
-                if isinstance(raw_summary, str) and raw_summary.strip():
-                    summary = raw_summary.strip()
+            raw_summary = metadata.get('summary')
+            if isinstance(raw_summary, str) and raw_summary.strip():
+                summary = raw_summary.strip()
 
-            description = body.strip()
+            content = post.content if isinstance(post.content, str) else str(post.content or '')
+            description = content.strip()
             if not description and summary:
                 description = summary
 
-            name = None
-            if isinstance(front_matter, dict):
-                raw_name = front_matter.get("name")
-                if isinstance(raw_name, str) and raw_name.strip():
-                    name = raw_name.strip()
-            if not name:
-                name = entity_id.replace("_", " ").title()
+            name = str(metadata.get('name')).strip()
 
-            entity_index[entity_id] = FactEntity(
-                id=entity_id,
-                type=canonical_type,
-                name=name,
-                summary=summary,
-                description=description or None,
-                aliases=aliases,
-                relationships=relationships,
-                attributes=attributes_clean,
-            )
+            try:
+                entity_index[entity_id] = FactEntity(
+                    id=entity_id,
+                    type=canonical_type,
+                    name=name,
+                    summary=summary,
+                    description=description or None,
+                    aliases=aliases,
+                    relationships=relationships,
+                    attributes=attributes_clean,
+                )
+            except ValidationError as exc:
+                logger.warning('Skipping entity file %s due to validation error: %s', path, exc)
+                continue
 
     if not entity_index:
         objekty_dir = repo_path / "Objekty"
