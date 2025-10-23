@@ -62,6 +62,41 @@ class FactGraph(BaseModel):
     )
 
 
+class FactEntityGraph(BaseModel):
+    """Slim graph used for entity reconciliation within the planner."""
+
+    entities: List[FactEntity] = Field(default_factory=list)
+
+
+class FactEntityUpdate(BaseModel):
+    """Represents an entity update detected by the planner."""
+
+    id: str = Field(..., description="Identifier of the entity to update")
+    existing: FactEntity = Field(..., description="Current canonical entity data")
+    incoming: FactEntity = Field(..., description="Incoming entity data from extraction")
+
+
+class ChangeOperation(BaseModel):
+    """Single create/update/delete directive emitted by the planner."""
+
+    operation: Literal["create", "update", "delete"]
+    entity: Optional[FactEntity] = Field(
+        default=None, description="Entity payload for create/delete operations"
+    )
+    update: Optional[FactEntityUpdate] = Field(
+        default=None, description="Structured update description"
+    )
+
+
+class ChangeSet(BaseModel):
+    """Collection of planner operations with optional token accounting."""
+
+    operations: List[ChangeOperation] = Field(default_factory=list)
+    tokens: Optional[Dict[str, int]] = Field(
+        default=None, description="Token usage reported by the AI adapter"
+    )
+
+
 class ConsistencyIssue(BaseModel):
     """Consistency issue discovered when comparing fact graphs."""
 
@@ -174,6 +209,10 @@ __all__ = [
     "FactEntity",
     "FactEvent",
     "FactGraph",
+    "FactEntityGraph",
+    "FactEntityUpdate",
+    "ChangeOperation",
+    "ChangeSet",
     "ConsistencyIssue",
     "ChangesetFile",
     "Changeset",
