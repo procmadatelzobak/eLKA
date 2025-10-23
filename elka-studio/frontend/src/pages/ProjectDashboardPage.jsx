@@ -1,8 +1,17 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useParams } from 'react-router-dom';
 import TaskSocket from '../services/websocket';
 import TaskItem from '../components/TaskItem';
-import { createTask, deleteTask, fetchProject, pauseTask, resetProject, resumeTask, syncProject } from '../services/api';
+import {
+  createTask,
+  deleteTask,
+  fetchProject,
+  importStories,
+  pauseTask,
+  resetProject,
+  resumeTask,
+  syncProject,
+} from '../services/api';
 import ProjectSettings from './ProjectSettings';
 import './ProjectDashboardPage.css';
 
@@ -38,6 +47,11 @@ const ProjectDashboardPage = () => {
   const [isSyncing, setIsSyncing] = useState(false);
   const [syncMessage, setSyncMessage] = useState(null);
   const [syncError, setSyncError] = useState(null);
+  const [selectedFiles, setSelectedFiles] = useState([]);
+  const [importError, setImportError] = useState(null);
+  const [importMessage, setImportMessage] = useState(null);
+  const [isImporting, setIsImporting] = useState(false);
+  const fileInputRef = useRef(null);
 
   useEffect(() => {
     const socket = new TaskSocket();
@@ -82,6 +96,13 @@ const ProjectDashboardPage = () => {
     setSyncMessage(null);
     setSyncError(null);
     setIsSyncing(false);
+    setImportError(null);
+    setImportMessage(null);
+    setSelectedFiles([]);
+    setIsImporting(false);
+    if (fileInputRef.current) {
+      fileInputRef.current.value = '';
+    }
   }, [projectId]);
 
   useEffect(() => {
@@ -422,6 +443,50 @@ const ProjectDashboardPage = () => {
     }
   };
 
+  const handleFileChange = (event) => {
+    const filesList = event.target.files;
+    const filesArray = filesList ? Array.from(filesList) : [];
+    setSelectedFiles(filesArray);
+    setImportError(null);
+    setImportMessage(null);
+  };
+
+  const handleUpload = async (event) => {
+    if (event && typeof event.preventDefault === 'function') {
+      event.preventDefault();
+    }
+
+    setImportError(null);
+    setImportMessage(null);
+
+    if (!selectedFiles || selectedFiles.length === 0) {
+      setImportError('Vyberte prosím alespoň jeden soubor k importu.');
+      return;
+    }
+
+    const formData = new FormData();
+    selectedFiles.forEach((file) => {
+      formData.append('files', file);
+    });
+
+    setIsImporting(true);
+
+    try {
+      const response = await importStories(projectId, formData);
+      const detail = response?.data?.message || 'Soubory nahrány, zpracování spuštěno.';
+      setImportMessage(detail);
+      setSelectedFiles([]);
+      if (fileInputRef.current) {
+        fileInputRef.current.value = '';
+      }
+    } catch (error) {
+      const detail = error.response?.data?.detail || 'Nahrávání souborů se nezdařilo.';
+      setImportError(detail);
+    } finally {
+      setIsImporting(false);
+    }
+  };
+
   return (
     <div className="project-dashboard">
       <header className="project-dashboard__header">
@@ -611,6 +676,47 @@ const ProjectDashboardPage = () => {
               />
               <button type="submit" className="task-form__submit" disabled={isSubmitting}>
                 {isSubmitting ? 'Submitting…' : 'Submit'}
+              </button>
+            </form>
+          </details>
+
+          <details className="task-forms__section">
+            <summary className="task-forms__summary">
+              <h3>Hromadný import příběhů</h3>
+            </summary>
+            <form className="task-form">
+              <label className="task-form__label" htmlFor="bulk-import-files">
+                Vyberte soubory (.txt nebo .md)
+              </label>
+              <input
+                id="bulk-import-files"
+                ref={fileInputRef}
+                type="file"
+                multiple
+                accept=".txt,.md"
+                className="task-form__input"
+                onChange={handleFileChange}
+              />
+              {selectedFiles.length > 0 && (
+                <p style={{ marginTop: '0.75rem', fontSize: '0.85rem', color: '#475569' }}>
+                  {selectedFiles.length === 1
+                    ? `${selectedFiles[0].name} připraven k importu.`
+                    : `${selectedFiles.length} souborů připraveno k importu.`}
+                </p>
+              )}
+              {importError && (
+                <div className="task-forms__alert task-forms__alert--error">{importError}</div>
+              )}
+              {importMessage && (
+                <div className="task-forms__alert task-forms__alert--success">{importMessage}</div>
+              )}
+              <button
+                type="button"
+                className="task-form__submit"
+                onClick={handleUpload}
+                disabled={isImporting}
+              >
+                {isImporting ? 'Nahrávám…' : 'Nahrát a zpracovat soubory'}
               </button>
             </form>
           </details>
