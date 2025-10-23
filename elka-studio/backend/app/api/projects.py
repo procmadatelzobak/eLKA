@@ -2,15 +2,17 @@
 
 from __future__ import annotations
 
+import datetime
 import logging
 import os
 import shutil
+import uuid
 from pathlib import Path
 from typing import Any, List, Optional, Tuple
 from urllib.parse import urlparse
 
 import git
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile, status
 from pydantic import BaseModel, validator
 from sqlalchemy.orm import Session
 
@@ -18,7 +20,9 @@ from ..db.session import get_session
 from ..models.project import Project
 from ..models.task import Task
 from ..services.git_manager import GitManager
+from ..services.task_manager import TaskManager
 from ..utils.config import load_config
+from ..utils.filesystem import sanitize_filename
 from ..utils.security import decrypt, encrypt, get_secret_key
 
 logger = logging.getLogger(__name__)
@@ -326,6 +330,111 @@ def list_universe_files(
     return _build_file_tree(project_path)
 
 
+@router.post(
+    "/{project_id}/import-stories",
+    summary="Import multiple story files",
+)
+async def import_stories(
+    project_id: int,
+    files: List[UploadFile] = File(...),
+    session: Session = Depends(get_session),
+) -> dict[str, Any]:
+    """Persist uploaded story files and enqueue sequential UCE processing."""
+
+    project = session.get(Project, project_id)
+    if project is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Project not found"
+        )
+
+    if not files:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="At least one file must be provided.",
+        )
+
+    projects_dir = _resolve_projects_dir()
+    git_manager = GitManager(str(projects_dir))
+
+    try:
+        project_path = Path(git_manager.resolve_project_path(project))
+    except FileNotFoundError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=str(exc),
+        ) from exc
+
+    stories_path = project_path / "Stories"
+    stories_path.mkdir(parents=True, exist_ok=True)
+
+    timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+    import_batch_dir = stories_path / f"Imported_{timestamp}"
+    import_batch_dir.mkdir(parents=True, exist_ok=True)
+
+    saved_file_paths: list[str] = []
+
+    for upload in files:
+        original_name = upload.filename or f"imported_story_{uuid.uuid4().hex[:8]}"
+        stem = sanitize_filename(Path(original_name).stem, default="imported_story")
+        if not stem:
+            stem = "imported_story"
+
+        safe_filename = f"{stem}.md"
+        destination_path = import_batch_dir / safe_filename
+        suffix_counter = 1
+        while destination_path.exists():
+            destination_path = import_batch_dir / f"{stem}_{suffix_counter}.md"
+            suffix_counter += 1
+
+        try:
+            with destination_path.open("wb") as buffer:
+                shutil.copyfileobj(upload.file, buffer)
+            saved_file_paths.append(str(destination_path.relative_to(project_path)))
+        except Exception as exc:  # pragma: no cover - filesystem dependent
+            logger.error(
+                "Failed to save imported file %s: %s", upload.filename or original_name, exc
+            )
+            continue
+        finally:
+            await upload.close()
+
+    if not saved_file_paths:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="No valid files were saved.",
+        )
+
+    manager = TaskManager()
+    first_file_path, *remaining_files = saved_file_paths
+
+    try:
+        manager.create_task(
+            project_id=project_id,
+            task_type="uce_process_story_task",
+            params={
+                "project_id": project_id,
+                "story_file_path": first_file_path,
+                "remaining_story_filenames": remaining_files,
+                "apply": False,
+            },
+        )
+    except Exception as exc:  # pragma: no cover - task scheduling dependent
+        logger.exception(
+            "Failed to schedule UCE processing for imported stories in project %s: %s",
+            project_id,
+            exc,
+        )
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Files were saved but processing could not be scheduled.",
+        ) from exc
+
+    return {
+        "message": f"{len(saved_file_paths)} files uploaded and processing started.",
+        "import_directory": str(import_batch_dir.relative_to(project_path)),
+    }
+
+
 @router.get(
     "/{project_id}/file-content",
     summary="Fetch the content of a file within a project",
@@ -509,4 +618,5 @@ __all__ = [
     "get_project_file_content",
     "sync_project",
     "reset_project_universe",
+    "import_stories",
 ]

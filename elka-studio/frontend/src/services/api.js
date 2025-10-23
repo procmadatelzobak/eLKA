@@ -56,6 +56,10 @@ export const updateAiSettings = (settings) => getApiClient().post('/settings/ai'
 
 export const resetProject = (projectId) => getApiClient().post(`/projects/${projectId}/reset`);
 export const syncProject = (projectId) => getApiClient().post(`/projects/${projectId}/sync`);
+export const importStories = (projectId, formData) =>
+  getApiClient().post(`/projects/${projectId}/import-stories`, formData, {
+    headers: { 'Content-Type': 'multipart/form-data' },
+  });
 
 export const fetchProjectAiModels = async (projectId) => {
   const response = await getApiClient().get(`/projects/${projectId}/settings/ai-models`);
