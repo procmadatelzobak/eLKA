@@ -320,81 +320,26 @@ class ExtractorEngine:
     def _clean_json_response(raw_response: str) -> str:
         """
         Cleans the raw response from the AI model to extract the JSON part.
-        Finds the first '{' or '[' and the last '}' or ']' to isolate the JSON.
-        Handles markdown code blocks as well. FINAL ATTEMPT.
+        Simple version focusing on removing known markdown markers.
         """
-
         if not raw_response:
             return ""
 
         text = raw_response.strip()
 
-        # Priorita: Regex pro standardní markdown blok (nejspolehlivější, pokud sedí)
-        # Upravený regex pro větší toleranci mezer
-        match = re.search(
-            r"```(?:json)?\s*({[\s\S]*?}|\[[\s\S]*?\])\s*```",
-            text,
-            re.DOTALL,
-        )
-        if match:
-            # print("DEBUG: Cleaned using regex")
-            return match.group(1).strip()
+        # Odstraní ```json na začátku (pokud tam je)
+        if text.startswith("```json"):
+            text = text[len("```json") :].strip()
+        # Odstraní ``` na začátku (pokud tam je a předchozí nebylo)
+        elif text.startswith("```"):
+            text = text[len("```") :].strip()
 
-        # Fallback 1: Pokud regex selhal, zkus najít první a poslední závorku
-        start_brace = text.find("{")
-        start_bracket = text.find("[")
+        # Odstraní ``` na konci (pokud tam je)
+        if text.endswith("```"):
+            text = text[: -len("```")].strip()
 
-        start_index = -1
-        if start_brace != -1 and start_bracket != -1:
-            start_index = min(start_brace, start_bracket)
-        elif start_brace != -1:
-            start_index = start_brace
-        elif start_bracket != -1:
-            start_index = start_bracket
-
-        end_brace = text.rfind("}")
-        end_bracket = text.rfind("]")
-
-        end_index = -1
-        if end_brace != -1 and end_bracket != -1:
-            end_index = max(end_brace, end_bracket)
-        elif end_brace != -1:
-            end_index = end_brace
-        elif end_bracket != -1:
-            end_index = end_bracket
-
-        # Pokud jsme našli platný začátek i konec
-        if start_index != -1 and end_index != -1 and end_index > start_index:
-            potential_json = text[start_index : end_index + 1]
-            # Ověření: Zkusíme, jestli je to validní JSON
-            try:
-                json.loads(potential_json)
-                # print(f"DEBUG: Cleaned using find - VALID: {potential_json[:100]}...")
-                return potential_json.strip()
-            except json.JSONDecodeError:
-                # Pokud ani toto není validní JSON, něco je hodně špatně
-                # print(f"DEBUG: Cleaned using find - INVALID: {potential_json[:100]}...")
-                pass  # Pokračujeme k poslednímu pokusu
-
-        # Fallback 2: Pokud ani hledání závorek nepomohlo,
-        # zkus odstranit jen ```json a ``` z Kraje (pokud tam jsou)
-        # a doufat, že zbytek je JSON. Toto je méně spolehlivé.
-        cleaned_text = text
-        if cleaned_text.startswith("```json"):
-            cleaned_text = cleaned_text[len("```json") :].strip()
-        elif cleaned_text.startswith("```"):
-            cleaned_text = cleaned_text[len("```") :].strip()
-        if cleaned_text.endswith("```"):
-            cleaned_text = cleaned_text[: -len("```")].strip()
-
-        # Pokud to po tomto čištění vypadá jako JSON, vrátíme to
-        if cleaned_text.startswith("{") or cleaned_text.startswith("["):
-            # print(f"DEBUG: Cleaned using basic strip: {cleaned_text[:100]}...")
-            return cleaned_text
-
-        # Pokud nic z toho nefungovalo, vrátíme prázdný string
-        # print(f"DEBUG: FINAL CLEANING FAILED for: {text[:100]}...")
-        return ""
+        # Vrátíme výsledek (může to být stále nevalidní JSON, pokud AI vrátila něco jiného)
+        return text
 
     def _prepare_string_result(self, payload: str) -> str:
         cleaned = self._clean_json_response(payload)

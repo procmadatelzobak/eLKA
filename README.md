@@ -137,7 +137,7 @@ All changes pushed to or proposed against the `main` branch trigger the **Backen
 - `POST /api/tasks/story/process` accepts `{ project_id, story_text, apply? }`. The default **DRY-RUN** mode always stores the diff in the task record.
 - The legends (`Legends/*.md`) and the template `templates/universe_scaffold/Legends/CORE_TRUTHS.md` are automatically loaded during validation.
 - Validation and entity extraction now reuse the in-memory universe context string directly, ensuring the Gemini validator and extractor stay aware of the complete lore set without relying on file-path hints.
-- Extractor retries now log raw provider responses when JSON decoding fails and detect incomplete payloads, helping diagnose upstream format issues quickly.
+- Extractor retries now log raw provider responses when JSON decoding fails, detect incomplete payloads, and rely on a simplified fence-stripping JSON cleaner to avoid overzealous parsing.
 - The planner reconciles entities primarily by their stable IDs and only calls the AI matcher for ambiguous cases, reducing the risk of duplicate records when stories are reprocessed.
 - If Gemini is unavailable, the heuristic adapter keeps the workflow running—the resulting diffs and Git commits remain deterministic.
 - Quick local test: run `pytest elka-studio/backend/tests/test_uce_pipeline.py` to confirm the full **DRY-RUN → APPLY → NO-OP** flow against a temporary Git repository.
