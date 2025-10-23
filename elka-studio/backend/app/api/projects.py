@@ -392,7 +392,9 @@ async def import_stories(
             saved_file_paths.append(str(destination_path.relative_to(project_path)))
         except Exception as exc:  # pragma: no cover - filesystem dependent
             logger.error(
-                "Failed to save imported file %s: %s", upload.filename or original_name, exc
+                "Failed to save imported file %s: %s",
+                upload.filename or original_name,
+                exc,
             )
             continue
         finally:
