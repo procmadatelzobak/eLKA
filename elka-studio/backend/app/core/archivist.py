@@ -9,6 +9,8 @@ from datetime import datetime
 from pathlib import Path
 from typing import Dict, Iterable, List, Optional, Tuple, Union
 
+import yaml
+
 from app.adapters.ai.base import BaseAIAdapter
 from app.adapters.git.base import GitAdapter
 from app.utils.config import Config
@@ -22,10 +24,10 @@ from .schemas import (
     ExtractedData,
     ExtractedEntity,
     ExtractedEvent,
-    FactEntity,
     FactEvent,
     FactGraph,
 )
+from ..core.schemas import FactEntity
 
 TEMPLATES_ROOT = (
     Path(__file__).resolve().parent.parent / "templates" / "universe_scaffold"
@@ -34,6 +36,33 @@ TEMPLATES_ROOT = (
 logger = logging.getLogger(__name__)
 
 EntityRecord = Union[ExtractedEntity, ExtractedEvent]
+
+
+_ENTITY_DIRECTORY_MAP: dict[str, tuple[str, str]] = {
+    "character": ("Characters", "Character"),
+    "characters": ("Characters", "Character"),
+    "person": ("Characters", "Character"),
+    "location": ("Locations", "Location"),
+    "locations": ("Locations", "Location"),
+    "place": ("Locations", "Location"),
+    "event": ("Events", "Event"),
+    "events": ("Events", "Event"),
+    "concept": ("Concepts", "Concept"),
+    "concepts": ("Concepts", "Concept"),
+    "idea": ("Concepts", "Concept"),
+    "item": ("Items", "Item"),
+    "items": ("Items", "Item"),
+    "artifact": ("Items", "Item"),
+    "thing": ("Items", "Item"),
+    "material": ("Misc", "Material"),
+    "materials": ("Misc", "Material"),
+    "organization": ("Misc", "Organization"),
+    "organizations": ("Misc", "Organization"),
+    "organisation": ("Misc", "Organization"),
+    "organisations": ("Misc", "Organization"),
+    "misc": ("Misc", "Misc"),
+    "other": ("Misc", "Misc"),
+}
 
 
 @dataclass(slots=True)
@@ -80,13 +109,29 @@ class ArchivistEngine:
 
         summary = self.ai_adapter.summarise(story_content)
 
-        target_path = Path(story_file_path)
+        provided_path = Path(story_file_path)
         saga_slug: str | None = None
         saga_directory: Path | None = None
-        if saga_theme:
-            saga_slug = self._slugify(str(saga_theme)) or "saga"
-            saga_directory = self.config.story_directory / saga_slug
-            target_path = saga_directory / target_path.name
+        configured_directory = self.config.story_directory
+        if configured_directory == Path("stories"):
+            story_directory = Path("Stories")
+        else:
+            story_directory = configured_directory
+
+        if provided_path.is_absolute():
+            target_path = provided_path
+        else:
+            extension = provided_path.suffix or ".md"
+            stem = provided_path.stem or provided_path.name or "story"
+            sanitized_stem = sanitize_filename(stem, default="story")
+            filename = f"{sanitized_stem}{extension}"
+            if saga_theme:
+                saga_slug = self._slugify(str(saga_theme)) or "saga"
+                saga_directory = story_directory / saga_slug
+                target_path = saga_directory / filename
+            else:
+                target_path = story_directory / filename
+
         absolute_path = (
             target_path
             if target_path.is_absolute()
@@ -100,6 +145,12 @@ class ArchivistEngine:
         except OSError as exc:
             logger.error("Failed to write story file %s: %s", absolute_path, exc)
             fallback_directory = self.config.ensure_story_directory(self.project_path)
+            if (
+                fallback_directory.name.lower() == "stories"
+                and fallback_directory.name != "Stories"
+            ):
+                fallback_directory = fallback_directory.parent / "Stories"
+                fallback_directory.mkdir(parents=True, exist_ok=True)
             if saga_slug:
                 fallback_directory = fallback_directory / saga_slug
                 fallback_directory.mkdir(parents=True, exist_ok=True)
@@ -373,17 +424,22 @@ class ArchivistEngine:
     ) -> Optional[Tuple[str, str]]:
         """Write an entity file to disk and return the relative path and content."""
 
-        name = getattr(entity, "name", None) or getattr(entity, "id", "entity")
-        sanitized_name = sanitize_filename(name, default="entity")
-        subdir = self._entity_subdirectory(entity_type)
-        file_path = self.project_path / "Objekty" / subdir / f"{sanitized_name}.txt"
-        file_path.parent.mkdir(parents=True, exist_ok=True)
-        content = self._render_entity_content(entity, entity_type)
+        prepared = self._prepare_fact_entity(entity, entity_type)
+        if prepared is None:
+            logger.warning("Unable to archive entity without a valid identifier: %s", entity)
+            return None
+
+        fact_entity, subfolder = prepared
+        filename = f"{fact_entity.id}.md"
+        entity_directory = Path("Entities") / subfolder
+        absolute_directory_path = self.project_path / entity_directory
+        absolute_directory_path.mkdir(parents=True, exist_ok=True)
+        file_path = absolute_directory_path / filename
+        content = self._format_document(fact_entity)
 
         logger.info("Writing entity file: %s", file_path)
         try:
-            with open(file_path, "w", encoding="utf-8") as handle:
-                handle.write(content)
+            file_path.write_text(content, encoding="utf-8")
             logger.info("Successfully wrote entity file: %s", file_path)
         except OSError as exc:  # pragma: no cover - filesystem interaction
             logger.error("Failed to write entity file %s: %s", file_path, exc)
@@ -396,74 +452,141 @@ class ArchivistEngine:
             )
             return None
 
-        relative = file_path.relative_to(self.project_path)
-        return str(relative), content
+        relative_path = entity_directory / filename
+        return relative_path.as_posix(), content
 
-    @staticmethod
-    def _entity_subdirectory(entity_type: EntityType) -> str:
-        mapping = {
-            EntityType.CHARACTER: "beings",
-            EntityType.LOCATION: "places",
-            EntityType.EVENT: "events",
-            EntityType.CONCEPT: "concepts",
-            EntityType.ITEM: "things",
-            EntityType.MATERIAL: "materials",
-            EntityType.ORGANIZATION: "organizations",
-            EntityType.OTHER: "misc",
-        }
-        return mapping.get(entity_type, "misc")
-
-    def _render_entity_content(
+    def _prepare_fact_entity(
         self,
-        entity: EntityRecord,
-        entity_type: EntityType,
-    ) -> str:
-        if isinstance(entity, ExtractedEvent) or entity_type == EntityType.EVENT:
-            event = entity if isinstance(entity, ExtractedEvent) else None
-            if event is None and isinstance(entity, ExtractedEntity):
-                event = ExtractedEvent(
-                    id=entity.id,
-                    name=entity.name,
-                    summary=entity.summary,
-                    description=entity.description,
-                )
-            return self._render_event_content(event)
+        entity: EntityRecord | FactEntity,
+        fallback_type: EntityType,
+    ) -> Optional[tuple[FactEntity, str]]:
+        """Normalise extracted entities into :class:`FactEntity` instances."""
 
-        if not isinstance(entity, ExtractedEntity):
-            return "\n"  # Fallback to empty file
+        entity_id = getattr(entity, "id", None)
+        if not entity_id:
+            return None
 
-        lines: list[str] = [entity.name]
+        raw_type = getattr(entity, "type", None)
+        if isinstance(raw_type, EntityType):
+            raw_type_value = raw_type.value
+        else:
+            raw_type_value = str(raw_type or "").strip().lower()
 
-        details_added = False
-        if entity.description and entity.description.strip():
-            lines.extend(["", entity.description.strip()])
-            details_added = True
-        elif entity.summary and entity.summary.strip():
-            lines.extend(["", entity.summary.strip()])
-            details_added = True
+        if not raw_type_value and isinstance(entity, ExtractedEntity):
+            raw_type_value = entity.entity_type.value
+        if not raw_type_value:
+            raw_type_value = fallback_type.value
+
+        directory, canonical_type = _ENTITY_DIRECTORY_MAP.get(
+            raw_type_value.lower(),
+            ("Misc", "Misc"),
+        )
+
+        name = (
+            getattr(entity, "name", None)
+            or getattr(entity, "title", None)
+            or str(entity_id)
+        )
+        summary = getattr(entity, "summary", None)
+        description = getattr(entity, "description", None)
+        if description is None and isinstance(entity, ExtractedEvent):
+            description = summary
+
+        aliases = list(getattr(entity, "aliases", []) or [])
+
+        relationships_obj = getattr(entity, "relationships", {}) or {}
+        if not isinstance(relationships_obj, dict):
+            relationships_obj = {}
+        relationships = {
+            str(key): str(value)
+            for key, value in relationships_obj.items()
+            if key
+        }
+
+        attributes_obj = getattr(entity, "attributes", {}) or {}
+        if not isinstance(attributes_obj, dict):
+            attributes_obj = {}
+        attributes = {str(key): value for key, value in attributes_obj.items() if key}
+
+        if isinstance(entity, ExtractedEvent):
+            if entity.date:
+                attributes.setdefault("date", entity.date)
+            if entity.location:
+                attributes.setdefault("location", entity.location)
+            if entity.participants:
+                attributes.setdefault("participants", list(entity.participants))
+
+        fact_entity = (
+            entity
+            if isinstance(entity, FactEntity)
+            else FactEntity(
+                id=str(entity_id),
+                type=canonical_type,
+                name=str(name),
+                summary=summary,
+                description=description,
+                aliases=aliases,
+                relationships=relationships,
+                attributes=attributes,
+            )
+        )
+
+        if isinstance(entity, FactEntity):
+            fact_entity = entity.model_copy(
+                update={
+                    "type": canonical_type,
+                    "name": entity.name or str(name),
+                    "summary": summary if summary is not None else entity.summary,
+                    "description": description
+                    if description is not None
+                    else entity.description,
+                    "aliases": aliases or entity.aliases,
+                    "relationships": relationships or entity.relationships,
+                    "attributes": attributes or entity.attributes,
+                }
+            )
+
+        return fact_entity, directory
+
+    def _format_document(self, entity: FactEntity) -> str:
+        """Generate YAML front matter and Markdown body for an entity file."""
+
+        yaml_data: dict[str, object] = {
+            "id": entity.id,
+            "type": entity.type,
+            "name": entity.name or entity.id,
+        }
 
         if entity.aliases:
-            lines.append("")
-            lines.append(
-                "Aliases: "
-                + ", ".join(
-                    sorted({alias.strip() for alias in entity.aliases if alias.strip()})
-                )
-            )
-            details_added = True
-
+            yaml_data["aliases"] = [alias for alias in entity.aliases if alias]
+        if entity.summary:
+            yaml_data["summary"] = entity.summary
+        if entity.relationships:
+            yaml_data["relationships"] = {
+                str(rel_id): str(rel_desc)
+                for rel_id, rel_desc in entity.relationships.items()
+                if rel_id
+            }
         if entity.attributes:
-            lines.append("")
-            for key, value in entity.attributes.items():
-                lines.append(f"{key}: {value}")
-            details_added = True
+            yaml_data["attributes"] = entity.attributes
 
-        if not details_added:
-            lines.append("")
-            lines.append("No additional details provided.")
+        yaml_string = yaml.dump(
+            yaml_data,
+            allow_unicode=True,
+            sort_keys=False,
+            default_flow_style=False,
+        )
 
-        content = "\n".join(lines).strip() + "\n"
-        return content
+        markdown_content = (entity.description or "").strip()
+        if not markdown_content and entity.summary:
+            markdown_content = entity.summary.strip()
+
+        final_content = f"---\n{yaml_string}---\n"
+        if markdown_content:
+            final_content += f"\n{markdown_content}\n"
+        else:
+            final_content += "\n"
+        return final_content
 
     def _update_timeline(self, events: List[ExtractedEvent]) -> List[str]:
         """Append extracted events to the project timeline when available."""
@@ -555,39 +678,6 @@ class ArchivistEngine:
         return [message]
 
     @staticmethod
-    def _render_event_content(event: Optional[ExtractedEvent]) -> str:
-        if event is None:
-            return "\n"
-
-        lines: list[str] = [event.name]
-
-        if event.description and event.description.strip():
-            lines.extend(["", event.description.strip()])
-        elif event.summary and event.summary.strip():
-            lines.extend(["", event.summary.strip()])
-
-        metadata_lines: list[str] = []
-        if event.date:
-            metadata_lines.append(f"Date: {event.date}")
-        if event.location:
-            metadata_lines.append(f"Location: {event.location}")
-        if metadata_lines:
-            lines.append("")
-            lines.extend(metadata_lines)
-
-        if event.participants:
-            lines.append("")
-            participants = ", ".join(
-                sorted(
-                    {participant for participant in event.participants if participant}
-                )
-            )
-            lines.append(f"Participants: {participants}")
-
-        content = "\n".join(lines).strip() + "\n"
-        return content
-
-    @staticmethod
     def _slugify(value: str) -> str:
         sanitized = sanitize_filename(value, default="story")
         return sanitized[:40]
@@ -597,13 +687,20 @@ def _parse_front_matter(text: str) -> dict[str, str]:
     match = re.match(r"^---\n(?P<body>.+?)\n---\n", text, flags=re.DOTALL)
     if not match:
         return {}
-    attributes: dict[str, str] = {}
-    for line in match.group("body").splitlines():
-        if ":" not in line:
-            continue
-        key, value = line.split(":", 1)
-        attributes[key.strip().lower()] = value.strip().strip('"')
-    return attributes
+    try:
+        data = yaml.safe_load(match.group("body")) or {}
+    except yaml.YAMLError:  # pragma: no cover - defensive parsing
+        return {}
+    if not isinstance(data, dict):
+        return {}
+    return {str(key): value for key, value in data.items()}
+
+
+def _extract_markdown_body(text: str) -> str:
+    match = re.match(r"^---\n.+?\n---\n(?P<body>[\s\S]*)", text, flags=re.DOTALL)
+    if not match:
+        return text.strip()
+    return match.group("body").strip()
 
 
 def _parse_attribute_block(text: str) -> dict[str, str]:
@@ -640,16 +737,31 @@ def _extract_core_truths(paths: Iterable[Path]) -> list[str]:
 
 def _collect_truth_sources(repo_path: Path) -> list[Path]:
     sources: list[Path] = []
-    core_truths_template = TEMPLATES_ROOT / "Legends" / "CORE_TRUTHS.md"
-    sources.append(core_truths_template)
-    legendy_dir = repo_path / "Legendy"
-    if legendy_dir.is_dir():
-        sources.extend(sorted(legendy_dir.glob("*.md")))
+    template_candidates = [
+        TEMPLATES_ROOT / "Canon" / "CoreTruths.md",
+        TEMPLATES_ROOT / "Legends" / "CORE_TRUTHS.md",
+    ]
+    for candidate in template_candidates:
+        if candidate.is_file() and candidate not in sources:
+            sources.append(candidate)
+
+    canon_dir = repo_path / "Canon"
+    if canon_dir.is_dir():
+        sources.extend(sorted(canon_dir.glob("*.md")))
+
+    legacy_dir = repo_path / "Legendy"
+    if legacy_dir.is_dir():
+        sources.extend(sorted(legacy_dir.glob("*.md")))
+
     return sources
 
 
 def _timeline_candidates(repo_path: Path) -> list[Path]:
-    return [repo_path / "timeline.md", repo_path / "timeline.txt"]
+    return [
+        repo_path / "Metadata" / "Timeline.md",
+        repo_path / "timeline.md",
+        repo_path / "timeline.txt",
+    ]
 
 
 def _parse_timeline_events(text: str) -> list[FactEvent]:
@@ -680,39 +792,147 @@ def _parse_timeline_events(text: str) -> list[FactEvent]:
 def load_universe(repo_path: Path) -> FactGraph:
     """Parse the existing universe files into a :class:`FactGraph`."""
 
-    entities: list[FactEntity] = []
+    entity_index: dict[str, FactEntity] = {}
     events: list[FactEvent] = []
 
-    objekty_dir = repo_path / "Objekty"
-    if objekty_dir.is_dir():
-        for path in sorted(objekty_dir.glob("*.md")):
+    entities_dir = repo_path / "Entities"
+    if entities_dir.is_dir():
+        for path in sorted(entities_dir.glob("*/*.md")):
+            if not path.is_file():
+                continue
             text = path.read_text(encoding="utf-8")
-            titles = re.findall(r"^#\s*(.+)", text, flags=re.MULTILINE)
-            entity_type = "place" if "place" in path.stem.lower() else "other"
-            attributes = {**_parse_front_matter(text), **_parse_attribute_block(text)}
-            entities.append(
-                FactEntity(
-                    id=_slugify(path.stem),
+            front_matter = _parse_front_matter(text)
+            body = _extract_markdown_body(text)
+
+            raw_id = front_matter.get("id") if isinstance(front_matter, dict) else None
+            entity_id = str(raw_id or path.stem)
+
+            raw_type = front_matter.get("type") if isinstance(front_matter, dict) else None
+            type_key = str(raw_type or path.parent.name).strip().lower()
+            _, canonical_type = _ENTITY_DIRECTORY_MAP.get(type_key, (path.parent.name, str(raw_type or path.parent.name)))
+
+            raw_aliases = []
+            if isinstance(front_matter, dict):
+                if isinstance(front_matter.get("aliases"), list):
+                    raw_aliases = front_matter.get("aliases", [])
+                elif front_matter.get("aliases"):
+                    raw_aliases = [front_matter.get("aliases")]
+                elif isinstance(front_matter.get("labels"), list):
+                    raw_aliases = front_matter.get("labels", [])
+                elif front_matter.get("labels"):
+                    raw_aliases = [front_matter.get("labels")]
+
+            aliases = [
+                str(alias).strip()
+                for alias in raw_aliases
+                if str(alias).strip()
+            ]
+
+            relationships_raw = (
+                front_matter.get("relationships")
+                if isinstance(front_matter, dict)
+                else {}
+            )
+            if not isinstance(relationships_raw, dict):
+                relationships_raw = {}
+            relationships = {
+                str(key): str(value)
+                for key, value in relationships_raw.items()
+                if str(key).strip()
+            }
+
+            attributes_raw = (
+                front_matter.get("attributes")
+                if isinstance(front_matter, dict)
+                else {}
+            )
+            if not isinstance(attributes_raw, dict):
+                attributes_raw = {}
+
+            additional_fields: dict[str, object] = {}
+            if isinstance(front_matter, dict):
+                for key, value in front_matter.items():
+                    if key in {
+                        "id",
+                        "type",
+                        "name",
+                        "aliases",
+                        "labels",
+                        "summary",
+                        "description",
+                        "relationships",
+                        "attributes",
+                    }:
+                        continue
+                    additional_fields[str(key)] = value
+
+            if additional_fields:
+                attributes_raw = {**attributes_raw, **additional_fields}
+
+            attributes_clean = {
+                str(key): value for key, value in attributes_raw.items()
+            }
+
+            summary = None
+            if isinstance(front_matter, dict):
+                raw_summary = front_matter.get("summary")
+                if isinstance(raw_summary, str) and raw_summary.strip():
+                    summary = raw_summary.strip()
+
+            description = body.strip()
+            if not description and summary:
+                description = summary
+
+            name = None
+            if isinstance(front_matter, dict):
+                raw_name = front_matter.get("name")
+                if isinstance(raw_name, str) and raw_name.strip():
+                    name = raw_name.strip()
+            if not name:
+                name = entity_id.replace("_", " ").title()
+
+            entity_index[entity_id] = FactEntity(
+                id=entity_id,
+                type=canonical_type,
+                name=name,
+                summary=summary,
+                description=description or None,
+                aliases=aliases,
+                relationships=relationships,
+                attributes=attributes_clean,
+            )
+
+    if not entity_index:
+        objekty_dir = repo_path / "Objekty"
+        if objekty_dir.is_dir():
+            for path in sorted(objekty_dir.glob("*.md")):
+                text = path.read_text(encoding="utf-8")
+                titles = re.findall(r"^#\s*(.+)", text, flags=re.MULTILINE)
+                entity_type = "place" if "place" in path.stem.lower() else "other"
+                attributes = {**_parse_front_matter(text), **_parse_attribute_block(text)}
+                entity_id = _slugify(path.stem)
+                entity_index[entity_id] = FactEntity(
+                    id=entity_id,
                     type=entity_type,
                     summary=titles[0] if titles else path.stem,
                     attributes=attributes,
                 )
-            )
 
-    legendy_dir = repo_path / "Legendy"
-    if legendy_dir.is_dir():
-        for path in sorted(legendy_dir.glob("*.md")):
-            text = path.read_text(encoding="utf-8")
-            titles = re.findall(r"^#\s*(.+)", text, flags=re.MULTILINE)
-            attributes = {**_parse_front_matter(text), **_parse_attribute_block(text)}
-            entities.append(
-                FactEntity(
-                    id=_slugify(path.stem),
+        legendy_dir = repo_path / "Legendy"
+        if legendy_dir.is_dir():
+            for path in sorted(legendy_dir.glob("*.md")):
+                text = path.read_text(encoding="utf-8")
+                titles = re.findall(r"^#\s*(.+)", text, flags=re.MULTILINE)
+                attributes = {**_parse_front_matter(text), **_parse_attribute_block(text)}
+                entity_id = _slugify(path.stem)
+                if entity_id in entity_index:
+                    continue
+                entity_index[entity_id] = FactEntity(
+                    id=entity_id,
                     type="concept",
                     summary=titles[0] if titles else path.stem,
                     attributes=attributes,
                 )
-            )
 
     for timeline_path in _timeline_candidates(repo_path):
         if not timeline_path.is_file():
@@ -723,7 +943,11 @@ def load_universe(repo_path: Path) -> FactGraph:
     core_truth_sources = _collect_truth_sources(repo_path)
     core_truths = _extract_core_truths(core_truth_sources)
 
-    return FactGraph(entities=entities, events=events, core_truths=core_truths)
+    return FactGraph(
+        entities=list(entity_index.values()),
+        events=events,
+        core_truths=core_truths,
+    )
 
 
 __all__ = ["ArchiveResult", "ArchivistEngine", "load_universe"]
