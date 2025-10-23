@@ -326,7 +326,12 @@ class ExtractorEngine:
         if not raw_response:
             return ""
 
-        match = re.search(r"```(?:json)?\s*([\s\S]*?)\s*```", raw_response, re.DOTALL)
+        # Hledá ```json (nebo jen ```), pak libovolné mezery/řádky, pak { nebo [, pak cokoli, pak } nebo ], pak libovolné mezery/řádky, pak ```
+        match = re.search(
+            r"```(?:json)?\s*({[\s\S]*?}|\[[\s\S]*?\])\s*```",
+            raw_response,
+            re.DOTALL,
+        )
 
         if match:
             cleaned_json = match.group(1).strip()
