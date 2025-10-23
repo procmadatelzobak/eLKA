@@ -24,9 +24,9 @@ class FactEntity(BaseModel):
         description="Alternative names and identifiers",
     )
     summary: Optional[str] = Field(default=None, description="Short description")
-    relationships: Optional[Dict[str, Any]] = Field(
+    relationships: Optional[Dict[str, str]] = Field(
         default=None,
-        description="Relationships to other entities keyed by name",
+        description="Relationships to other entities keyed by identifier",
     )
     attributes: Dict[str, Any] = Field(
         default_factory=dict, description="Additional metadata for compatibility"

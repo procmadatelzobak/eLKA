@@ -4,7 +4,6 @@ fastapi
 GitPython
 python-dotenv
 pyyaml
-python-frontmatter
 redis
 limits
 sqlalchemy
@@ -13,3 +12,4 @@ google-genai>=0.3.0
 
 google-generativeai
 ruamel.yaml
+python-frontmatter

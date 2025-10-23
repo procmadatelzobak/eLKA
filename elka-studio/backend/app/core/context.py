@@ -51,17 +51,13 @@ class AppContext:
     @property
     def validator_ai(self) -> BaseAIAdapter:
         if self._validator_ai is None:
-            validator, writer = get_ai_adapters(self.config)
-            self._validator_ai = validator
-            self._writer_ai = writer
+            self._load_ai_adapters()
         return self._validator_ai
 
     @property
     def writer_ai(self) -> BaseAIAdapter:
         if self._writer_ai is None:
-            validator, writer = get_ai_adapters(self.config)
-            self._validator_ai = validator
-            self._writer_ai = writer
+            self._load_ai_adapters()
         return self._writer_ai
 
     @property
@@ -71,6 +67,16 @@ class AppContext:
                 ai_adapter=self.validator_ai, config=self.config
             )
         return self._validator
+
+    def _load_ai_adapters(self) -> None:
+        try:
+            validator, writer = get_ai_adapters(self.config)
+        except Exception as exc:  # pragma: no cover - defensive logging
+            logger.error("Failed to initialise AI adapters: %s", exc)
+            raise
+
+        self._validator_ai = validator
+        self._writer_ai = writer
 
     def create_git_adapter(self, project: Project) -> GitAdapter:
         project_path = self.git_manager.resolve_project_path(project)

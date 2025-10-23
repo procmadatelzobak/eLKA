@@ -440,6 +440,15 @@ class ArchivistEngine:
             return None
 
         fact_entity, subfolder = prepared
+
+        entity_type_key = (fact_entity.type or "").strip().lower()
+        if not subfolder or entity_type_key not in _ENTITY_DIRECTORY_MAP:
+            logger.warning(
+                "Unknown entity type '%s' for entity %s; using Misc directory.",
+                fact_entity.type or "<missing>",
+                fact_entity.id,
+            )
+            subfolder = "Misc"
         filename = f"{fact_entity.id}.md"
         entity_directory = Path("Entities") / subfolder
         absolute_directory_path = self.project_path / entity_directory
@@ -573,7 +582,7 @@ class ArchivistEngine:
             yaml_data["summary"] = entity.summary
         if entity.relationships:
             yaml_data["relationships"] = {
-                str(rel_id): str(rel_desc)
+                rel_id: rel_desc
                 for rel_id, rel_desc in entity.relationships.items()
                 if rel_id
             }
