@@ -356,6 +356,47 @@ def uce_process_story_task(
         log_message=start_message,
     )
 
+    def _queue_next_story(reason: str | None = None) -> None:
+        """Schedule the next sequential story processing task if available."""
+
+        nonlocal remaining_story_filenames
+
+        if not remaining_story_filenames:
+            if reason:
+                logger.info(
+                    "Finished processing story chain for task %s (%s)",
+                    task_db_id,
+                    reason,
+                )
+            else:
+                logger.info(
+                    "Finished processing story chain for task %s",
+                    task_db_id,
+                )
+            return
+
+        next_story_filename = remaining_story_filenames[0]
+        new_remaining_list = remaining_story_filenames[1:]
+        logger.info(
+            "Queueing sequential UCE processing for %s (remaining %s) after %s",
+            next_story_filename,
+            len(new_remaining_list),
+            reason or "completed run",
+        )
+        uce_process_story_task.apply_async(
+            args=[task_db_id],
+            kwargs={
+                "project_id": project_id,
+                "story_text": None,
+                "apply": apply,
+                "story_file_path": next_story_filename,
+                "saga_theme": saga_theme,
+                "remaining_story_filenames": new_remaining_list,
+                "parent_task_id": parent_task_id,
+            },
+        )
+        remaining_story_filenames = new_remaining_list
+
     try:
         project = app_context.git_manager.get_project_from_db(project_id)
         project_path = app_context.git_manager.resolve_project_path(project)
@@ -438,6 +479,7 @@ def uce_process_story_task(
                     "notes": ["no-op: universe already up-to-date"],
                 },
             )
+            _queue_next_story("no-op result")
             return
 
         diff_preview = []
@@ -471,6 +513,7 @@ def uce_process_story_task(
                 result=result_data,
             )
             manager.update_task_field(celery_task_id, "result", result_data)
+            _queue_next_story("dry-run")
             return
 
         git_adapter = app_context.create_git_adapter(project)
@@ -503,26 +546,7 @@ def uce_process_story_task(
         )
         manager.update_task_field(celery_task_id, "result", result_data)
 
-        if remaining_story_filenames:
-            next_story_filename = remaining_story_filenames[0]
-            new_remaining_list = remaining_story_filenames[1:]
-            logger.info(
-                "Queueing sequential UCE processing for %s (remaining %s)",
-                next_story_filename,
-                len(new_remaining_list),
-            )
-            uce_process_story_task.apply_async(
-                args=[task_db_id],
-                kwargs={
-                    "project_id": project_id,
-                    "story_text": None,
-                    "apply": apply,
-                    "story_file_path": next_story_filename,
-                    "saga_theme": saga_theme,
-                    "remaining_story_filenames": new_remaining_list,
-                    "parent_task_id": parent_task_id,
-                },
-            )
+        _queue_next_story("applied changes" if apply else "completed run")
     except Exception as exc:  # pragma: no cover - defensive logging
         if isinstance(exc, Retry):
             raise

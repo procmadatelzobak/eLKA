@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import logging
 import re
+import time
 import unicodedata
 from typing import Any, Dict, Iterable, List, Optional
 
@@ -159,8 +160,24 @@ class ExtractorEngine:
 
         while attempts < 3:
             attempts += 1
+            raw_result: Any | None = None
             try:
+                logger.info(
+                    "Extractor attempt %s for story (first 100 chars): %s…",
+                    attempts,
+                    story_text[:100].replace("\n", " "),
+                )
+                logger.debug(
+                    "Extractor attempt %s sending full story: %s",
+                    attempts,
+                    story_text,
+                )
                 raw_result, tokens = self._invoke_model(user_prompt, model_key)
+                logger.debug(
+                    "Extractor attempt %s received raw response: %s",
+                    attempts,
+                    raw_result,
+                )
                 llm_result = self._coerce_result(raw_result)
                 processed_payload = self._post_process(llm_result)
 
@@ -198,17 +215,59 @@ class ExtractorEngine:
                     raise ValueError(
                         "Pydantic validation failed after adding IDs"
                     ) from exc
-
                 return parsed_data, tokens
-            except (json.JSONDecodeError, TypeError, ValueError) as exc:
+            except json.JSONDecodeError as exc:
                 last_error = exc
+                logger.warning(
+                    "Extractor attempt %s failed to decode JSON: %s",
+                    attempts,
+                    exc,
+                )
+                if raw_result is not None:
+                    logger.error(
+                        "Extractor raw response for failed decode on attempt %s: %s",
+                        attempts,
+                        raw_result,
+                    )
                 if attempts >= 3:
                     break
-                logger.warning("Extractor attempt %s failed: %s", attempts, exc)
+                time.sleep(2 ** (attempts - 1))
                 user_prompt = (
                     "Return ONLY JSON. If you cannot comply, respond with an empty JSON object.\n"
                     f"{base_prompt}"
                 )
+            except (TypeError, ValueError) as exc:
+                last_error = exc
+                logger.warning("Extractor attempt %s failed: %s", attempts, exc)
+                if raw_result is not None:
+                    logger.warning(
+                        "Extractor raw response snippet on attempt %s: %s",
+                        attempts,
+                        str(raw_result)[:200],
+                    )
+                if attempts >= 3:
+                    break
+                time.sleep(2 ** (attempts - 1))
+                user_prompt = (
+                    "Return ONLY JSON. If you cannot comply, respond with an empty JSON object.\n"
+                    f"{base_prompt}"
+                )
+            except Exception as exc:  # pragma: no cover - defensive logging
+                last_error = exc
+                logger.error(
+                    "Extractor attempt %s failed with unexpected error: %s",
+                    attempts,
+                    exc,
+                    exc_info=True,
+                )
+                logger.error(
+                    "Story snippet during extractor failure: %s",
+                    story_text[:500],
+                )
+                if attempts >= 3:
+                    break
+                time.sleep(2 ** (attempts - 1))
+                user_prompt = base_prompt
 
         raise ValueError(
             "Failed to extract structured entities from story"
@@ -258,11 +317,31 @@ class ExtractorEngine:
 
         raise RuntimeError("AI adapter does not support JSON extraction.")
 
+    def _prepare_string_result(self, payload: str) -> str:
+        cleaned = payload.strip()
+        if not cleaned or cleaned in {"```", "```json"}:
+            raise ValueError("Received incomplete or empty JSON response from extractor")
+
+        if cleaned.startswith("```"):
+            lines = cleaned.splitlines()
+            if lines and lines[0].startswith("```"):
+                lines = lines[1:]
+            if lines and lines[-1].startswith("```"):
+                lines = lines[:-1]
+            cleaned = "\n".join(lines).strip()
+            if not cleaned:
+                raise ValueError(
+                    "Received empty JSON payload after removing code fences"
+                )
+
+        return cleaned
+
     def _coerce_result(self, payload: Any) -> Dict[str, Any]:
         if isinstance(payload, dict):
             return payload
         if isinstance(payload, str):
-            return json.loads(payload)
+            prepared = self._prepare_string_result(payload)
+            return json.loads(prepared)
         raise TypeError("Extractor returned non-string payload")
 
     def _post_process(

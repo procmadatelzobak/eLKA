@@ -16,7 +16,7 @@ eLKA Studio is a full-stack application for building and managing fictional univ
 - **Universe reset tooling** – Instantly wipe lore files and restore the default scaffold to start fresh tests or story arcs.
 - **Full-context story pipeline** – A single task loads the entire universe, generates consistent lore, archives entities, and updates the timeline automatically.
 - **Manual story processing** – Submit existing stories for validation, extraction, and archival directly from the dashboard.
-- **Bulk story import** – Upload existing Markdown or text files in one batch and queue the Universe Consistency Engine for sequential processing.
+- **Bulk story import** – Upload existing Markdown or text files in one batch and queue the Universe Consistency Engine for sequential processing that now continues even when individual stories resolve as no-ops or dry-runs.
 - **Universe browser** – Explore repository directories and preview Markdown or text files through a dedicated read-only viewer.
 - **Text-to-speech previews** – Listen to Universe Browser file contents using integrated Web Speech controls.
 - **Objects entity archival** – Persist extracted characters, locations, and events into `.txt` files inside the `Objects/` structure used by AI Universe projects.
@@ -137,6 +137,7 @@ All changes pushed to or proposed against the `main` branch trigger the **Backen
 - `POST /api/tasks/story/process` accepts `{ project_id, story_text, apply? }`. The default **DRY-RUN** mode always stores the diff in the task record.
 - The legends (`Legends/*.md`) and the template `templates/universe_scaffold/Legends/CORE_TRUTHS.md` are automatically loaded during validation.
 - Validation and entity extraction now reuse the in-memory universe context string directly, ensuring the Gemini validator and extractor stay aware of the complete lore set without relying on file-path hints.
+- Extractor retries now log raw provider responses when JSON decoding fails and detect incomplete payloads, helping diagnose upstream format issues quickly.
 - The planner reconciles entities primarily by their stable IDs and only calls the AI matcher for ambiguous cases, reducing the risk of duplicate records when stories are reprocessed.
 - If Gemini is unavailable, the heuristic adapter keeps the workflow running—the resulting diffs and Git commits remain deterministic.
 - Quick local test: run `pytest elka-studio/backend/tests/test_uce_pipeline.py` to confirm the full **DRY-RUN → APPLY → NO-OP** flow against a temporary Git repository.
