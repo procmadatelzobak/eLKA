@@ -248,17 +248,35 @@ class GeminiAdapter(BaseAIAdapter):
         text, _ = self.generate_text(contents, model_key=model_key)
         return text
 
+    def _clean_json_response(self, raw_response: str) -> str:
+        """Normalise raw Gemini responses to isolate JSON content."""
+
+        if not raw_response:
+            return ""
+
+        text = raw_response.strip()
+
+        if text.startswith("```json"):
+            text = text[len("```json") :].strip()
+        elif text.startswith("```"):
+            text = text[len("```") :].strip()
+
+        if text.endswith("```"):
+            text = text[: -len("```")].strip()
+
+        return text
+
     def generate_json(
         self, system: str, user: str, model_key: str | None = None
-    ) -> tuple[str, dict | None]:
+    ) -> tuple[Any, dict | None]:
         """Return JSON-formatted text by combining system and user prompts."""
 
         prompt = f"{system}\n\n{user}"
         try:
-            text, metadata = self.generate_text(prompt, model_key=model_key)
+            raw_response, tokens = self.generate_text(prompt, model_key=model_key)
         except (ResourceExhausted, ClientError) as exc:
             self._handle_rate_limit(exc, operation="JSON generation")
-            return "{}", None
+            return {}, None
         except Exception as exc:
             # Allow Celery retry exceptions to propagate without logging.
             if isinstance(exc, Retry):
@@ -270,17 +288,37 @@ class GeminiAdapter(BaseAIAdapter):
             )
             raise
         try:
-            self.logger.debug(f"Attempting to parse cleaned JSON: '{text}'")
+            raw_response_text = (
+                raw_response
+                if isinstance(raw_response, str)
+                else ("" if raw_response is None else str(raw_response))
+            )
+            text = self._clean_json_response(raw_response_text)
+
+            # --- PŘIDANÉ DEFINITIVNÍ LOGOVÁNÍ ---
+            self.logger.info(f"--- DEBUG JSON PARSING ---")
+            self.logger.info(
+                f"Raw response snippet: {raw_response_text[:200]}..."
+            )
+            self.logger.info(f"Cleaned text snippet: {text[:200]}...")
+            self.logger.info(f"Cleaned text length: {len(text)}")
+            self.logger.info(
+                f"Cleaned text repr(): {repr(text[:200])}..."
+            )
             if not text:
                 self.logger.error(
-                    "CRITICAL: Cleaned JSON string is empty before parsing!"
+                    "CRITICAL: Cleaned JSON string IS EMPTY before parsing!"
                 )
             elif not (text.startswith("{") or text.startswith("[")):
                 self.logger.error(
-                    "CRITICAL: Cleaned JSON string does not start with '{' or '['. Starts with: '%s'",
-                    text[:20],
+                    f"CRITICAL: Cleaned JSON string does NOT start with '{{' or '['. Starts with char code: {ord(text[0]) if text else 'N/A'}"
                 )
-            json.loads(text)
+            else:
+                self.logger.info("Cleaned text seems to start correctly.")
+            self.logger.info(f"--- END DEBUG JSON PARSING ---")
+            # --- KONEC PŘIDANÉHO LOGOVÁNÍ ---
+
+            parsed = json.loads(text)
         except json.JSONDecodeError as exc:
             error_message = f"Failed to decode JSON from Gemini: {text}"
             logger.error(error_message)
@@ -290,7 +328,7 @@ class GeminiAdapter(BaseAIAdapter):
                 raise
             logger.error("Error processing Gemini JSON response: %s", exc)
             raise
-        return text, metadata
+        return parsed, tokens
 
     def _is_rate_limit_error(self, exc: Exception) -> bool:
         if isinstance(exc, ResourceExhausted):
