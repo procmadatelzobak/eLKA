@@ -3,17 +3,20 @@
 from __future__ import annotations
 
 import json
+import logging
 import re
 import unicodedata
-import uuid
 from typing import Any, Dict, Iterable, List, Optional
 
 from pydantic import ValidationError
-from unidecode import unidecode
 
 from app.adapters.ai.base import BaseAIAdapter
 
+from ..utils.identifiers import generate_entity_id
 from .schemas import ExtractedData, FactEntity, FactEvent, FactGraph
+
+
+logger = logging.getLogger(__name__)
 
 
 def _slugify(text: str) -> str:
@@ -23,19 +26,6 @@ def _slugify(text: str) -> str:
     ascii_text = normalised.encode("ascii", "ignore").decode("ascii")
     cleaned = re.sub(r"[^a-zA-Z0-9]+", "_", ascii_text).strip("_").lower()
     return cleaned or "item"
-
-
-def _generate_entity_id(entity_type: str, name: str) -> str:
-    """Generates a stable and unique ID for an entity."""
-
-    sanitized_name = unidecode(name).lower()
-    sanitized_name = re.sub(r"\s+", "_", sanitized_name)
-    sanitized_name = re.sub(r"[^a-z0-9_]+", "", sanitized_name)
-    sanitized_name = sanitized_name[:30]
-
-    short_uuid = str(uuid.uuid4())[:8]
-
-    return f"{entity_type.lower()}_{sanitized_name}_{short_uuid}"
 
 
 EXTRACTOR_SYSTEM_PROMPT = """
@@ -49,7 +39,7 @@ Each entity object MUST include:
 - "description": A brief description based on the text.
 - "aliases": (Optional) A list of alternative names found in the text.
 - "summary": (Optional) A one-sentence summary.
-- "relationships": (Optional) A dictionary mapping related entity names (found in the text) to a description of the relationship.
+- "relationships": (Optional) A dictionary mapping related entity identifiers to a human-readable string describing the relationship. The description MUST be a string.
 
 DO NOT include an "id" field; it will be generated later.
 Focus on accuracy and completeness based ONLY on the provided text.
@@ -102,10 +92,16 @@ def _normalise_aliases(value: Any) -> List[str]:
     return []
 
 
-def _normalise_relationships(value: Any) -> Dict[str, Any]:
+def _normalise_relationships(value: Any) -> Dict[str, str]:
+    relationships: Dict[str, str] = {}
     if isinstance(value, dict):
-        return {str(key): relation for key, relation in value.items() if isinstance(key, str)}
-    return {}
+        for key, relation in value.items():
+            if not isinstance(key, str):
+                continue
+            if relation is None:
+                continue
+            relationships[key] = str(relation)
+    return relationships
 
 
 class ExtractorEngine:
@@ -136,6 +132,33 @@ class ExtractorEngine:
         raw_result, tokens = self._invoke_model(user_prompt, model_key)
         llm_result = self._coerce_result(raw_result)
         processed_payload = self._post_process(llm_result)
+
+        for entity_list in processed_payload.values():
+            for entity_payload in entity_list:
+                relationships = entity_payload.get("relationships")
+                if not relationships:
+                    continue
+                if not isinstance(relationships, dict):
+                    logger.warning(
+                        "Discarding malformed relationships for entity '%s': expected dict, got %s",
+                        entity_payload.get("name") or entity_payload.get("id"),
+                        type(relationships).__name__,
+                    )
+                    entity_payload["relationships"] = {}
+                    continue
+                for rel_id, rel_desc in list(relationships.items()):
+                    if isinstance(rel_desc, str):
+                        continue
+                    try:
+                        relationships[rel_id] = str(rel_desc)
+                    except Exception:  # pragma: no cover - defensive logging
+                        logger.warning(
+                            "Failed to coerce relationship description for '%s' -> '%s' (%r)",
+                            entity_payload.get("name") or entity_payload.get("id"),
+                            rel_id,
+                            rel_desc,
+                        )
+                        relationships.pop(rel_id, None)
 
         try:
             parsed_data = ExtractedData(**processed_payload)
@@ -225,12 +248,12 @@ class ExtractorEngine:
         self, raw_entity: Any, canonical_type: str
     ) -> Optional[Dict[str, Any]]:
         if not isinstance(raw_entity, dict):
-            print(f"Skipping incomplete entity data: {raw_entity}")
+            logger.debug("Skipping incomplete entity data: %s", raw_entity)
             return None
 
         name = str(raw_entity.get("name", "")).strip()
         if not name:
-            print(f"Skipping incomplete entity data: {raw_entity}")
+            logger.debug("Skipping incomplete entity data without name: %s", raw_entity)
             return None
 
         raw_type = raw_entity.get("type")
@@ -253,7 +276,7 @@ class ExtractorEngine:
         relationships = _normalise_relationships(raw_entity.get("relationships"))
 
         entity_payload: Dict[str, Any] = {
-            "id": _generate_entity_id(resolved_type, name),
+            "id": generate_entity_id(resolved_type, name),
             "type": resolved_type,
             "name": name,
             "description": description,
@@ -328,6 +351,5 @@ __all__ = [
     "EXTRACTOR_SYSTEM_PROMPT",
     "extract_fact_graph",
     "extract_story_entities",
-    "_generate_entity_id",
     "_slugify",
 ]
