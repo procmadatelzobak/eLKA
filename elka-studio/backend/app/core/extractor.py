@@ -225,8 +225,7 @@ class ExtractorEngine:
                 )
                 if raw_result is not None:
                     logger.error(
-                        "Extractor raw response for failed decode on attempt %s: %s",
-                        attempts,
+                        "Extractor failed JSON decoding. Raw response from AI was: %s",
                         raw_result,
                     )
                 if attempts >= 3:
