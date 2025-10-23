@@ -26,6 +26,16 @@ eLKA Studio is a full-stack application for building and managing fictional univ
 - **Per-project AI model overrides** – Configure extraction, validation, generation, and planning models for each project with automatic fallbacks to the global configuration.
 - **Hard-sync Git controls** – Keep the working tree aligned with the remote default branch through automatic pre-task synchronisation and a dedicated dashboard button.
 
+## Architecture
+
+eLKA Studio combines a FastAPI backend, a Celery worker layer, and a React/Vite frontend. Redis brokers real-time task updates, while Git integration keeps universe repositories synchronized across automated pipelines and manual workflows.
+
+## Universe Data Format
+
+eLKA Studio uses a standardized format for storing universe data within Git repositories. This format utilizes Markdown files with YAML Front Matter for structured metadata.
+
+For the detailed specification, please see the [**eLKA Universe Data Standard (UNIVERSE_FORMAT.md)**](UNIVERSE_FORMAT.md).
+
 ## Quick Start
 1. Clone the repository: `git clone <repo-url> && cd elka-studio`
 2. Install everything with `make setup` (see `scripts/install.sh` for details).
