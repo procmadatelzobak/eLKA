@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import difflib
 import json
+import logging
 import os
 import time
 from datetime import datetime, timezone
@@ -13,7 +14,6 @@ from typing import Any, Dict, List, Optional
 
 from celery.exceptions import Retry
 from celery.result import AsyncResult
-from celery.utils.log import get_task_logger
 
 from app.adapters.ai.base import get_ai_adapters
 from app.celery_app import celery_app
@@ -30,7 +30,7 @@ from app.tasks.base import BaseTask
 from app.utils.filesystem import sanitize_filename
 from app.services.project_settings import load_project_ai_models
 
-logger = get_task_logger(__name__)
+logger = logging.getLogger(__name__)
 
 
 def _escape_front_matter(value: str) -> str:
@@ -324,9 +324,11 @@ def uce_process_story_task(
     apply: bool = False,
     *,
     story_file_path: str | None = None,
+    file_path: str | None = None,
     saga_theme: str | None = None,
     remaining_story_filenames: Optional[List[str]] | None = None,
     parent_task_id: int | None = None,
+    token: str | None = None,
 ) -> None:
     """Execute the Universe Consistency Engine pipeline.
 
@@ -340,6 +342,27 @@ def uce_process_story_task(
     manager = TaskManager()
     celery_task_id = self.request.id
     _ = parent_task_id
+
+    kwargs = dict(getattr(self.request, "kwargs", {}) or {})
+
+    if file_path and not story_file_path:
+        story_file_path = file_path
+
+    if "project_id" not in kwargs:
+        kwargs["project_id"] = project_id
+    if "token" not in kwargs and token is not None:
+        kwargs["token"] = token
+    if (
+        "remaining_story_filenames" not in kwargs
+        and remaining_story_filenames is not None
+    ):
+        kwargs["remaining_story_filenames"] = remaining_story_filenames
+    if "parent_task_id" not in kwargs and parent_task_id is not None:
+        kwargs["parent_task_id"] = parent_task_id
+    if "apply" not in kwargs:
+        kwargs["apply"] = apply
+
+    use_snippet_chaining = bool(kwargs.get("token"))
 
     start_message = (
         f"Task {task_db_id}: starting Universe Consistency Engine run."
@@ -377,6 +400,17 @@ def uce_process_story_task(
 
         next_story_filename = remaining_story_filenames[0]
         new_remaining_list = remaining_story_filenames[1:]
+
+        if use_snippet_chaining:
+            logger.info(
+                "Task %s queued chaining via token workflow for %s (remaining %s) after %s",
+                task_db_id,
+                next_story_filename,
+                len(new_remaining_list),
+                reason or "completed run",
+            )
+            return
+
         logger.info(
             "Queueing sequential UCE processing for %s (remaining %s) after %s",
             next_story_filename,
@@ -480,7 +514,8 @@ def uce_process_story_task(
                 },
             )
             _queue_next_story("no-op result")
-            return
+            if not use_snippet_chaining:
+                return
 
         diff_preview = []
         for file in changeset.files:
@@ -514,7 +549,8 @@ def uce_process_story_task(
             )
             manager.update_task_field(celery_task_id, "result", result_data)
             _queue_next_story("dry-run")
-            return
+            if not use_snippet_chaining:
+                return
 
         git_adapter = app_context.create_git_adapter(project)
         branch_name = f"task/process-story-{task_db_id}"
@@ -547,6 +583,41 @@ def uce_process_story_task(
         manager.update_task_field(celery_task_id, "result", result_data)
 
         _queue_next_story("applied changes" if apply else "completed run")
+        if not use_snippet_chaining:
+            return
+        # --- ZAČÁTEK KÓDU PRO ŘETĚZENÍ ---
+        # Získání seznamu zbývajících souborů z argumentů tasku
+        remaining_story_filenames = kwargs.get('remaining_story_filenames') 
+
+        if remaining_story_filenames: # Pokud seznam existuje a není prázdný
+            # Vezmeme první ze zbývajících
+            next_story_filename = remaining_story_filenames[0] 
+            # Připravíme seznam pro další krok (bez toho prvního)
+            new_remaining_list = remaining_story_filenames[1:] 
+
+            # Získáme ID projektu a token z aktuálních kwargs
+            project_id = kwargs.get('project_id')
+            token = kwargs.get('token')
+            parent_task_id = kwargs.get('parent_task_id') # Předáme i parent_id
+
+            # Pokud máme platné ID projektu a další soubor
+            if project_id is not None and next_story_filename:
+                logger.info(f"Task {celery_task_id}: Chaining next story processing for: {next_story_filename}")
+                # Spustíme další task v řetězu se zmenšeným seznamem
+                uce_process_story_task.delay(
+                    project_id=project_id,
+                    token=token, 
+                    file_path=next_story_filename,
+                    remaining_story_filenames=new_remaining_list,
+                    parent_task_id=parent_task_id 
+                )
+            else:
+                logger.error(f"Task {celery_task_id}: Cannot chain next task. Missing project_id or next_filename. Remaining: {remaining_story_filenames}")
+
+        else:
+            # Seznam je prázdný nebo neexistuje, končíme řetěz.
+            logger.info(f"Task {celery_task_id}: Finished processing chain.")
+        # --- KONEC KÓDU PRO ŘETĚZENÍ ---
     except Exception as exc:  # pragma: no cover - defensive logging
         if isinstance(exc, Retry):
             raise
