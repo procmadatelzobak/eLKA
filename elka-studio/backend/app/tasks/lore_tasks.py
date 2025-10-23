@@ -643,14 +643,51 @@ def generate_story_from_seed_task(
     pr_id: int | None = None,
     story_title: str | None = None,
     story_author: str | None = None,
+    *,
+    task_type_hint: str | None = None,
+    remaining_story_contents: list[str] | None = None,
+    parent_task_id: int | None = None,
+    token: str | None = None,
+    uce_apply: bool | None = None,
 ) -> dict:
-    """Generate a story from a seed and return the content for further processing."""
+    """Generate a story from a seed and optionally trigger the UCE pipeline."""
 
     from app.services.task_manager import TaskManager
 
     manager = TaskManager()
     celery_task_id = self.request.id
     tokens = {"input": 0, "output": 0}
+
+    request_kwargs = dict(getattr(self.request, "kwargs", {}) or {})
+    if task_type_hint is None:
+        task_type_hint = request_kwargs.get("task_type_hint")
+    if remaining_story_contents is None:
+        remaining_story_contents = request_kwargs.get("remaining_story_contents")
+    if parent_task_id is None:
+        parent_task_id = request_kwargs.get("parent_task_id")
+    if token is None:
+        token = request_kwargs.get("token")
+    if uce_apply is None:
+        uce_apply = request_kwargs.get("uce_apply")
+
+    rewrite_mode = (task_type_hint or "").lower() == "rewrite_import"
+    apply_flag = bool(uce_apply) if uce_apply is not None else False
+    remaining_list: list[str] = []
+    if isinstance(remaining_story_contents, (list, tuple, set)):
+        remaining_list = list(remaining_story_contents)
+
+    effective_parent_id = parent_task_id if parent_task_id is not None else task_db_id
+
+    rewrite_prompt = (
+        "Please rewrite the following story text faithfully. Maintain the "
+        "original language, style, and all narrative details. Omit any "
+        "non-narrative headers or metadata present at the beginning. Just "
+        "output the clean story text:"
+    )
+
+    story_content_result: str | None = None
+    story_relative_path: Path | None = None
+    result_payload: dict[str, Any] = {}
 
     try:
         manager.update_task_status(
@@ -698,7 +735,12 @@ def generate_story_from_seed_task(
             ),
         )
 
-        prompt_template = """
+        if rewrite_mode:
+            prompt = seed.strip() or (
+                f"{rewrite_prompt}\n\n---\n\n{seed.strip()}"
+            )
+        else:
+            prompt_template = """
 **Full Universe Context:**
 ---
 {full_context_string}
@@ -714,11 +756,11 @@ Ensure the generated story is deeply consistent with **all** aspects of the esta
 **Generated Story:**
 """.strip()
 
-        prompt = prompt_template.format(
-            project_name=project.name,
-            seed=seed.strip(),
-            full_context_string=full_context_string,
-        )
+            prompt = prompt_template.format(
+                project_name=project.name,
+                seed=seed.strip(),
+                full_context_string=full_context_string,
+            )
 
         truncated_prompt = prompt[:500]
         if len(prompt) > 500:
@@ -747,13 +789,24 @@ Ensure the generated story is deeply consistent with **all** aspects of the esta
             or "Untitled Story"
         )
         resolved_author = (story_author or "").strip() or "eLKA Author"
-        story_content, story_relative_path = _build_story_document(
-            project,
-            seed,
-            resolved_title,
-            resolved_author,
-            generated_body=generated_body,
-        )
+
+        if rewrite_mode:
+            story_content = generated_body
+        else:
+            story_content, story_relative_path = _build_story_document(
+                project,
+                seed,
+                resolved_title,
+                resolved_author,
+                generated_body=generated_body,
+            )
+
+        metadata_payload = {
+            "title": resolved_title,
+            "author": resolved_author,
+        }
+        if story_relative_path is not None:
+            metadata_payload["relative_path"] = str(story_relative_path)
 
         manager.update_task_status(
             celery_task_id,
@@ -762,17 +815,14 @@ Ensure the generated story is deeply consistent with **all** aspects of the esta
             log_message="Story drafted. Preparing processing pipeline...",
             result={
                 "story": story_content,
-                "metadata": {
-                    "title": resolved_title,
-                    "author": resolved_author,
-                    "relative_path": str(story_relative_path),
-                },
+                "metadata": metadata_payload,
             },
             input_tokens=usage_increment["input"],
             output_tokens=usage_increment["output"],
         )
 
-        return {
+        story_content_result = story_content
+        result_payload = {
             "task_db_id": task_db_id,
             "project_id": project_id,
             "story_content": story_content,
@@ -780,7 +830,9 @@ Ensure the generated story is deeply consistent with **all** aspects of the esta
             "pr_id": pr_id,
             "story_title": resolved_title,
             "story_author": resolved_author,
-            "story_file_path": str(story_relative_path),
+            "story_file_path": str(story_relative_path)
+            if story_relative_path is not None
+            else None,
             "seed": seed,
         }
     except Exception as exc:  # pragma: no cover - defensive logging
@@ -796,7 +848,55 @@ Ensure the generated story is deeply consistent with **all** aspects of the esta
     finally:
         self.update_db_task_tokens(tokens["input"], tokens["output"])
 
+    if rewrite_mode and story_content_result:
+        logger.info(
+            "Task %s: Dispatching UCE processing for rewritten import story.",
+            celery_task_id,
+        )
+        uce_process_story_task.apply_async(
+            args=[task_db_id],
+            kwargs={
+                "project_id": project_id,
+                "story_text": story_content_result,
+                "apply": apply_flag,
+                "parent_task_id": effective_parent_id,
+                "token": token,
+            },
+        )
 
+        if remaining_list:
+            next_story_content = remaining_list[0]
+            new_remaining = remaining_list[1:]
+
+            if next_story_content:
+                logger.info(
+                    "Task %s: Chaining next story regeneration for import.",
+                    celery_task_id,
+                )
+                generate_story_from_seed_task.apply_async(
+                    args=[task_db_id],
+                    kwargs={
+                        "project_id": project_id,
+                        "seed": f"{rewrite_prompt}\n\n---\n\n{next_story_content}",
+                        "task_type_hint": "rewrite_import",
+                        "remaining_story_contents": new_remaining,
+                        "parent_task_id": effective_parent_id,
+                        "token": token,
+                        "uce_apply": apply_flag,
+                    },
+                )
+            else:
+                logger.error(
+                    "Task %s: Cannot chain next regeneration task. Missing content.",
+                    celery_task_id,
+                )
+        else:
+            logger.info(
+                "Task %s: Finished regeneration chain for import.",
+                celery_task_id,
+            )
+
+    return result_payload
 @celery_app.task(
     bind=True,
     base=BaseTask,

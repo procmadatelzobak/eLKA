@@ -33,6 +33,8 @@ TASK_MAPPING = {
     "generate_story_from_seed_task": lore_tasks.generate_story_from_seed_task,
     "generate_and_process_story_from_seed": lore_tasks.generate_story_from_seed_task,
     "generate_and_process_story_from_seed_task": lore_tasks.generate_story_from_seed_task,
+    "rewrite_import_story": lore_tasks.generate_story_from_seed_task,
+    "rewrite_import_story_task": lore_tasks.generate_story_from_seed_task,
     "process_story": lore_tasks.process_story_task,
     "process_story_task": lore_tasks.process_story_task,
     "generate_chapter": lore_tasks.generate_chapter_task,
