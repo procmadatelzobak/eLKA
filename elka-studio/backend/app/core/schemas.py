@@ -5,7 +5,7 @@ from __future__ import annotations
 from enum import Enum
 from typing import Any, Dict, List, Literal, Optional
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
 class FactEntity(BaseModel):
@@ -15,7 +15,9 @@ class FactEntity(BaseModel):
 
     id: str = Field(..., description="Stable identifier for the entity")
     type: str = Field(..., description="Categorised entity type")
-    name: str = Field(..., description="Primary human-readable name for the entity")
+    name: str = Field(
+        default="", description="Primary human-readable name for the entity"
+    )
     description: Optional[str] = Field(
         default=None, description="Detailed Markdown description"
     )
@@ -31,6 +33,12 @@ class FactEntity(BaseModel):
     attributes: Dict[str, Any] = Field(
         default_factory=dict, description="Additional metadata for compatibility"
     )
+
+    @model_validator(mode="after")
+    def _apply_defaults(self) -> "FactEntity":
+        if not self.name:
+            object.__setattr__(self, "name", self.id)
+        return self
 
 
 class FactEvent(BaseModel):
@@ -66,7 +74,9 @@ class FactEntityUpdate(BaseModel):
 
     id: str = Field(..., description="Identifier of the entity to update")
     existing: FactEntity = Field(..., description="Current canonical entity data")
-    incoming: FactEntity = Field(..., description="Incoming entity data from extraction")
+    incoming: FactEntity = Field(
+        ..., description="Incoming entity data from extraction"
+    )
 
 
 class ChangeOperation(BaseModel):

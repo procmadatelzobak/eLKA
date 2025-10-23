@@ -437,7 +437,9 @@ def sync_project(project_id: int, session: Session = Depends(get_session)) -> di
     return {"detail": "Repository synchronised successfully."}
 
 
-@router.post("/{project_id}/reset", summary="Reset a project's universe to default scaffold")
+@router.post(
+    "/{project_id}/reset", summary="Reset a project's universe to default scaffold"
+)
 def reset_project_universe(
     project_id: int, session: Session = Depends(get_session)
 ) -> dict:
@@ -474,15 +476,11 @@ def reset_project_universe(
         tasks_to_delete.delete(synchronize_session=False)
         session.commit()
 
-        return {
-            "message": "Project universe reset and all tasks cleared successfully."
-        }
+        return {"message": "Project universe reset and all tasks cleared successfully."}
 
     except Exception as exc:
         session.rollback()
-        logger.exception(
-            "Failed to reset project universe for project %s", project_id
-        )
+        logger.exception("Failed to reset project universe for project %s", project_id)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to reset project universe: {exc}",

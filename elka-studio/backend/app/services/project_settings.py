@@ -17,7 +17,9 @@ MODEL_SETTING_KEYS: Dict[str, str] = {
     "planning": "ai_model_planning",
 }
 
-SETTING_KEY_TO_MODEL: Dict[str, str] = {value: key for key, value in MODEL_SETTING_KEYS.items()}
+SETTING_KEY_TO_MODEL: Dict[str, str] = {
+    value: key for key, value in MODEL_SETTING_KEYS.items()
+}
 
 
 def fetch_project_ai_settings(session: Session, project_id: int) -> Dict[str, str]:
@@ -55,7 +57,9 @@ def build_default_ai_settings(config: Config) -> Dict[str, str]:
     }
 
 
-def resolve_project_ai_models(config: Config, overrides: Dict[str, str]) -> Dict[str, str]:
+def resolve_project_ai_models(
+    config: Config, overrides: Dict[str, str]
+) -> Dict[str, str]:
     """Merge project overrides with global defaults and return the effective map."""
 
     resolved = build_default_ai_settings(config)

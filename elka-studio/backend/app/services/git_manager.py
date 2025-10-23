@@ -169,7 +169,7 @@ class GitManager:
         project_path = self.resolve_project_path(project)
         try:
             repo = git.Repo(project_path)
-        except (git.InvalidGitRepositoryError) as exc:
+        except git.InvalidGitRepositoryError as exc:
             raise RuntimeError(f"{project_path} is not a git repository") from exc
 
         try:
@@ -185,7 +185,7 @@ class GitManager:
                 repo.git.fetch("--prune", "origin")
                 try:
                     repo.git.reset("--hard", f"origin/{branch}")
-                except GitCommandError as exc:
+                except GitCommandError:
                     fallback_branch = self._determine_branch(repo)
                     if fallback_branch == branch:
                         raise
@@ -336,7 +336,12 @@ class GitManager:
             if candidate.exists() and candidate.is_dir():
                 shutil.rmtree(candidate, ignore_errors=True)
 
-        for timeline_name in ("timeline.md", "timeline.txt", "Timeline.md", "Timeline.txt"):
+        for timeline_name in (
+            "timeline.md",
+            "timeline.txt",
+            "Timeline.md",
+            "Timeline.txt",
+        ):
             candidate = project_path / timeline_name
             if candidate.exists() and candidate.is_file():
                 candidate.unlink(missing_ok=True)

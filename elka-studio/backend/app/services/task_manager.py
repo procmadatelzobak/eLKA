@@ -64,10 +64,18 @@ class TaskManager:
             config = app_context.config
 
             models = {
-                "extraction": settings_map.get("ai_model_extraction", config.validator_model()),
-                "validation": settings_map.get("ai_model_validation", config.validator_model()),
-                "generation": settings_map.get("ai_model_generation", config.writer_model()),
-                "planning": settings_map.get("ai_model_planning", config.writer_model()),
+                "extraction": settings_map.get(
+                    "ai_model_extraction", config.validator_model()
+                ),
+                "validation": settings_map.get(
+                    "ai_model_validation", config.validator_model()
+                ),
+                "generation": settings_map.get(
+                    "ai_model_generation", config.writer_model()
+                ),
+                "planning": settings_map.get(
+                    "ai_model_planning", config.writer_model()
+                ),
             }
             return models
         finally:
@@ -128,9 +136,7 @@ class TaskManager:
         session = SessionLocal()
         try:
             task_in_db = (
-                session.query(Task)
-                .filter_by(celery_task_id=celery_task_id)
-                .first()
+                session.query(Task).filter_by(celery_task_id=celery_task_id).first()
             )
             if not task_in_db:
                 self.logger.warning(
@@ -153,17 +159,13 @@ class TaskManager:
                 loop = asyncio.new_event_loop()
                 try:
                     asyncio.set_event_loop(loop)
-                    loop.run_until_complete(
-                        ws_manager.broadcast_task_update(task_data)
-                    )
+                    loop.run_until_complete(ws_manager.broadcast_task_update(task_data))
                 finally:
                     asyncio.set_event_loop(None)
                     loop.close()
 
             self._broadcast_update(task_in_db.project_id)
-            self.logger.info(
-                "Updated field '%s' for task %s", field, task_in_db.id
-            )
+            self.logger.info("Updated field '%s' for task %s", field, task_in_db.id)
         except Exception as exc:
             session.rollback()
             self.logger.error(
@@ -217,8 +219,12 @@ class TaskManager:
             if token_increment_input or token_increment_output:
                 task.input_tokens = (task.input_tokens or 0) + token_increment_input
                 task.output_tokens = (task.output_tokens or 0) + token_increment_output
-                task.total_input_tokens = (task.total_input_tokens or 0) + token_increment_input
-                task.total_output_tokens = (task.total_output_tokens or 0) + token_increment_output
+                task.total_input_tokens = (
+                    task.total_input_tokens or 0
+                ) + token_increment_input
+                task.total_output_tokens = (
+                    task.total_output_tokens or 0
+                ) + token_increment_output
 
             session.add(task)
             session.commit()
@@ -429,8 +435,7 @@ class TaskManager:
 
         try:
             commit_message = str(
-                result_payload.get("commit_message")
-                or f"Apply task {task.id} changes"
+                result_payload.get("commit_message") or f"Apply task {task.id} changes"
             )
             if relative_written_paths:
                 repository.index.add(sorted(relative_written_paths))
@@ -438,7 +443,9 @@ class TaskManager:
                 repository.git.add(A=True)
             commit_sha = repository.index.commit(commit_message).hexsha
         except GitCommandError as exc:
-            raise RuntimeError(f"Failed to commit task {task.id} changes: {exc}") from exc
+            raise RuntimeError(
+                f"Failed to commit task {task.id} changes: {exc}"
+            ) from exc
 
         try:
             git_adapter.push_branch(target_branch)

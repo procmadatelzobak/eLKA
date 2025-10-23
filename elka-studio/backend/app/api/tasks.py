@@ -61,9 +61,7 @@ def _normalize_params(params: Mapping[str, Any]) -> Dict[str, Any]:
     return normalized
 
 
-def _synchronise_project(
-    session: Session, project_id: int
-) -> Project:
+def _synchronise_project(session: Session, project_id: int) -> Project:
     """Ensure the project's repository matches the remote default branch."""
 
     project = session.get(Project, project_id)
