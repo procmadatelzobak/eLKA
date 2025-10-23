@@ -34,9 +34,7 @@ class AppContext:
 
     def _initialise(self) -> None:
         self.config = Config()
-        self.git_manager = GitManager(
-            self.config.projects_dir, config=self.config
-        )
+        self.git_manager = GitManager(self.config.projects_dir, config=self.config)
         self._ai_adapter: Optional[BaseAIAdapter] = None
         self._validator_ai: Optional[BaseAIAdapter] = None
         self._writer_ai: Optional[BaseAIAdapter] = None

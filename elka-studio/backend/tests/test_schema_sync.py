@@ -14,7 +14,9 @@ def test_synchronize_sqlite_schema_adds_missing_columns(tmp_path: Path) -> None:
     """Columns added to the ORM are created on existing SQLite databases."""
 
     db_path = tmp_path / "legacy.db"
-    engine = create_engine(f"sqlite:///{db_path}", connect_args={"check_same_thread": False})
+    engine = create_engine(
+        f"sqlite:///{db_path}", connect_args={"check_same_thread": False}
+    )
 
     # Simulate a pre-existing tasks table that predates newer columns.
     with engine.begin() as connection:

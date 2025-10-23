@@ -95,4 +95,3 @@ def synchronize_sqlite_schema(engine: Engine, metadata: MetaData) -> None:
 
 
 __all__ = ["synchronize_sqlite_schema"]
-

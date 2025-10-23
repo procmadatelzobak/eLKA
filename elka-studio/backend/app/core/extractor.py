@@ -70,8 +70,32 @@ _ENTITY_KEY_TO_TYPE: Dict[str, str] = {
     "misc": "Misc",
 }
 
+_TYPE_SYNONYMS: Dict[str, str] = {
+    "character": "Character",
+    "person": "Character",
+    "people": "Character",
+    "hero": "Character",
+    "location": "Location",
+    "place": "Location",
+    "city": "Location",
+    "event": "Event",
+    "battle": "Event",
+    "concept": "Concept",
+    "idea": "Concept",
+    "item": "Item",
+    "object": "Item",
+    "artifact": "Item",
+    "misc": "Misc",
+    "other": "Misc",
+}
+
 _ALLOWED_TYPE_LOOKUP: Dict[str, str] = {
-    canonical.lower(): canonical for canonical in _ENTITY_KEY_TO_TYPE.values()
+    **{canonical.lower(): canonical for canonical in _ENTITY_KEY_TO_TYPE.values()},
+    **_TYPE_SYNONYMS,
+}
+
+_TYPE_TO_KEY: Dict[str, str] = {
+    canonical: key for key, canonical in _ENTITY_KEY_TO_TYPE.items()
 }
 
 
@@ -128,46 +152,67 @@ class ExtractorEngine:
         if not story_text.strip():
             raise ValueError("Story text must not be empty for extraction.")
 
-        user_prompt = _build_user_prompt(story_text, universe_context)
-        raw_result, tokens = self._invoke_model(user_prompt, model_key)
-        llm_result = self._coerce_result(raw_result)
-        processed_payload = self._post_process(llm_result)
+        base_prompt = _build_user_prompt(story_text, universe_context)
+        user_prompt = base_prompt
+        attempts = 0
+        last_error: Exception | None = None
 
-        for entity_list in processed_payload.values():
-            for entity_payload in entity_list:
-                relationships = entity_payload.get("relationships")
-                if not relationships:
-                    continue
-                if not isinstance(relationships, dict):
-                    logger.warning(
-                        "Discarding malformed relationships for entity '%s': expected dict, got %s",
-                        entity_payload.get("name") or entity_payload.get("id"),
-                        type(relationships).__name__,
-                    )
-                    entity_payload["relationships"] = {}
-                    continue
-                for rel_id, rel_desc in list(relationships.items()):
-                    if isinstance(rel_desc, str):
-                        continue
-                    try:
-                        relationships[rel_id] = str(rel_desc)
-                    except Exception:  # pragma: no cover - defensive logging
-                        logger.warning(
-                            "Failed to coerce relationship description for '%s' -> '%s' (%r)",
-                            entity_payload.get("name") or entity_payload.get("id"),
-                            rel_id,
-                            rel_desc,
-                        )
-                        relationships.pop(rel_id, None)
+        while attempts < 3:
+            attempts += 1
+            try:
+                raw_result, tokens = self._invoke_model(user_prompt, model_key)
+                llm_result = self._coerce_result(raw_result)
+                processed_payload = self._post_process(llm_result)
 
-        try:
-            parsed_data = ExtractedData(**processed_payload)
-        except ValidationError as exc:  # pragma: no cover - adapter specific
-            raise ValueError(
-                "Pydantic validation failed after adding IDs"
-            ) from exc
+                for entity_list in processed_payload.values():
+                    for entity_payload in entity_list:
+                        relationships = entity_payload.get("relationships")
+                        if not relationships:
+                            continue
+                        if not isinstance(relationships, dict):
+                            logger.warning(
+                                "Discarding malformed relationships for entity '%s': expected dict, got %s",
+                                entity_payload.get("name") or entity_payload.get("id"),
+                                type(relationships).__name__,
+                            )
+                            entity_payload["relationships"] = {}
+                            continue
+                        for rel_id, rel_desc in list(relationships.items()):
+                            if isinstance(rel_desc, str):
+                                continue
+                            try:
+                                relationships[rel_id] = str(rel_desc)
+                            except Exception:  # pragma: no cover - defensive logging
+                                logger.warning(
+                                    "Failed to coerce relationship description for '%s' -> '%s' (%r)",
+                                    entity_payload.get("name")
+                                    or entity_payload.get("id"),
+                                    rel_id,
+                                    rel_desc,
+                                )
+                                relationships.pop(rel_id, None)
 
-        return parsed_data, tokens
+                try:
+                    parsed_data = ExtractedData(**processed_payload)
+                except ValidationError as exc:  # pragma: no cover - adapter specific
+                    raise ValueError(
+                        "Pydantic validation failed after adding IDs"
+                    ) from exc
+
+                return parsed_data, tokens
+            except (json.JSONDecodeError, TypeError, ValueError) as exc:
+                last_error = exc
+                if attempts >= 3:
+                    break
+                logger.warning("Extractor attempt %s failed: %s", attempts, exc)
+                user_prompt = (
+                    "Return ONLY JSON. If you cannot comply, respond with an empty JSON object.\n"
+                    f"{base_prompt}"
+                )
+
+        raise ValueError(
+            "Failed to extract structured entities from story"
+        ) from last_error
 
     def _invoke_model(
         self,
@@ -220,7 +265,9 @@ class ExtractorEngine:
             return json.loads(payload)
         raise TypeError("Extractor returned non-string payload")
 
-    def _post_process(self, llm_result: Dict[str, Any]) -> Dict[str, List[Dict[str, Any]]]:
+    def _post_process(
+        self, llm_result: Dict[str, Any]
+    ) -> Dict[str, List[Dict[str, Any]]]:
         processed: Dict[str, List[Dict[str, Any]]] = {
             key: [] for key in _ENTITY_KEY_TO_TYPE
         }
@@ -231,6 +278,29 @@ class ExtractorEngine:
                 lowered = key.lower()
                 if lowered in _ENTITY_KEY_TO_TYPE:
                     normalised_keys[lowered] = value
+
+        general_entities = llm_result.get("entities")
+        if isinstance(general_entities, Iterable) and not isinstance(
+            general_entities, (str, bytes)
+        ):
+            for raw_entity in general_entities:
+                if not isinstance(raw_entity, dict):
+                    continue
+                raw_type = raw_entity.get("type")
+                canonical_type = None
+                if isinstance(raw_type, str) and raw_type.strip():
+                    canonical_type = _ALLOWED_TYPE_LOOKUP.get(raw_type.strip().lower())
+                if not canonical_type:
+                    raise ValueError(
+                        f"Unsupported entity type returned by extractor: {raw_type!r}"
+                    )
+                target_key = _TYPE_TO_KEY.get(canonical_type, "misc")
+                entity_payload = self._normalise_entity(raw_entity, canonical_type)
+                if not entity_payload:
+                    raise ValueError(
+                        f"Entity payload missing required fields for type '{canonical_type}'"
+                    )
+                processed[target_key].append(entity_payload)
 
         for key, canonical_type in _ENTITY_KEY_TO_TYPE.items():
             raw_entities = normalised_keys.get(key, [])
@@ -251,17 +321,24 @@ class ExtractorEngine:
             logger.debug("Skipping incomplete entity data: %s", raw_entity)
             return None
 
-        name = str(raw_entity.get("name", "")).strip()
+        name_source = (
+            raw_entity.get("name") or raw_entity.get("title") or raw_entity.get("id")
+        )
+        name = str(name_source or "").strip()
         if not name:
             logger.debug("Skipping incomplete entity data without name: %s", raw_entity)
             return None
 
         raw_type = raw_entity.get("type")
         resolved_type = canonical_type
+        resolved_label = canonical_type.lower()
         if isinstance(raw_type, str) and raw_type.strip():
             candidate = _ALLOWED_TYPE_LOOKUP.get(raw_type.strip().lower())
             if candidate:
                 resolved_type = candidate
+                resolved_label = raw_type.strip().lower()
+            else:
+                raise ValueError(f"Unsupported entity type '{raw_type}'")
         aliases = _normalise_aliases(raw_entity.get("aliases"))
         description = raw_entity.get("description")
         if isinstance(description, str):
@@ -274,15 +351,38 @@ class ExtractorEngine:
         else:
             summary = None
         relationships = _normalise_relationships(raw_entity.get("relationships"))
+        attributes: Dict[str, Any] = {}
+        raw_attributes = raw_entity.get("attributes")
+        if isinstance(raw_attributes, dict):
+            for key, value in raw_attributes.items():
+                if isinstance(key, str):
+                    attributes[key] = value
+        if resolved_type.lower() == "event":
+            participants_raw = raw_entity.get("participants")
+            if isinstance(participants_raw, Iterable) and not isinstance(
+                participants_raw, (str, bytes)
+            ):
+                if relationships is None:
+                    relationships = {}
+                for participant in participants_raw:
+                    if not isinstance(participant, str):
+                        continue
+                    slug = _slugify(participant)
+                    if slug:
+                        relationships[slug] = "participant"
+            location = raw_entity.get("location")
+            if isinstance(location, str) and location.strip():
+                attributes["location"] = _slugify(location)
 
         entity_payload: Dict[str, Any] = {
             "id": generate_entity_id(resolved_type, name),
-            "type": resolved_type,
+            "type": resolved_label,
             "name": name,
             "description": description,
             "summary": summary,
             "aliases": aliases,
             "relationships": relationships,
+            "attributes": attributes,
         }
         return entity_payload
 
@@ -315,12 +415,18 @@ def extract_fact_graph(
             if event_entity.relationships
             else []
         )
+        location = None
+        if event_entity.attributes:
+            raw_location = event_entity.attributes.get("location")
+            if isinstance(raw_location, str) and raw_location.strip():
+                location = raw_location
         events.append(
             FactEvent(
                 id=event_entity.id,
                 title=event_entity.name,
                 description=event_entity.description or event_entity.summary,
                 participants=participants,
+                location=location,
             )
         )
 

@@ -83,7 +83,9 @@ class PlannerEngine:
 
         updated_entities_by_id: List[FactEntityUpdate] = []
         potential_new_entities: List[FactEntity] = []
-        existing_unmatched_entities: List[FactEntity] = list(current_entities_map.values())
+        existing_unmatched_entities: List[FactEntity] = list(
+            current_entities_map.values()
+        )
 
         for entity_id, incoming_entity in incoming_entities_map.items():
             existing_entity = current_entities_map.get(entity_id)
@@ -96,7 +98,9 @@ class PlannerEngine:
                     )
                 )
                 existing_unmatched_entities = [
-                    entity for entity in existing_unmatched_entities if entity.id != entity_id
+                    entity
+                    for entity in existing_unmatched_entities
+                    if entity.id != entity_id
                 ]
             else:
                 potential_new_entities.append(incoming_entity)
@@ -110,7 +114,9 @@ class PlannerEngine:
                 existing_unmatched_entities, potential_new_entities
             )
             try:
-                llm_result, tokens = self._invoke_ai(prompt_payload, model_key=model_key)
+                llm_result, tokens = self._invoke_ai(
+                    prompt_payload, model_key=model_key
+                )
             except Exception as exc:  # pragma: no cover - defensive logging
                 self.logger.error("Error during AI entity matching: %s", exc)
                 final_new_entities = potential_new_entities
@@ -123,7 +129,9 @@ class PlannerEngine:
                     )
                     if llm_new_entities:
                         matched_update_ids = {
-                            update.incoming.id for update in llm_updated_entities if update.incoming.id
+                            update.incoming.id
+                            for update in llm_updated_entities
+                            if update.incoming.id
                         }
                         final_new_entities = self._merge_new_entities(
                             llm_new_entities,
@@ -172,10 +180,12 @@ class PlannerEngine:
     ) -> Dict[str, List[Dict[str, Any]]]:
         return {
             "existing_unmatched_entities": [
-                entity.model_dump(exclude_none=True) for entity in existing_unmatched_entities
+                entity.model_dump(exclude_none=True)
+                for entity in existing_unmatched_entities
             ],
             "potential_new_entities": [
-                entity.model_dump(exclude_none=True) for entity in potential_new_entities
+                entity.model_dump(exclude_none=True)
+                for entity in potential_new_entities
             ],
         }
 
@@ -255,7 +265,9 @@ class PlannerEngine:
             try:
                 return FactEntity.model_validate(payload)
             except Exception as exc:  # pragma: no cover - defensive logging
-                self.logger.warning("Failed to parse AI provided entity payload: %s", exc)
+                self.logger.warning(
+                    "Failed to parse AI provided entity payload: %s", exc
+                )
                 return None
         return None
 
@@ -349,9 +361,7 @@ class PlannerEngine:
         if not matched_ids:
             return potential_new_entities
         return [
-            entity
-            for entity in potential_new_entities
-            if entity.id not in matched_ids
+            entity for entity in potential_new_entities if entity.id not in matched_ids
         ]
 
 

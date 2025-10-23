@@ -756,6 +756,10 @@ def process_story_task(
     try:
         project = app_context.git_manager.get_project_from_db(project_id)
         project_path = Path(app_context.git_manager.resolve_project_path(project))
+        models = load_project_ai_models(app_context.config, project_id)
+        validator_ai, writer_ai = get_ai_adapters(
+            app_context.config, project_id=project_id
+        )
 
         relative_story_path: Path
         if story_file_path:
@@ -771,7 +775,9 @@ def process_story_task(
                 story_title or "Untitled Story"
             ).strip() or "Untitled Story"
             sanitized = sanitize_filename(fallback_title, default="story")
-            timestamped_name = f"{sanitized}-{datetime.utcnow().strftime('%Y%m%d-%H%M%S')}.md"
+            timestamped_name = (
+                f"{sanitized}-{datetime.utcnow().strftime('%Y%m%d-%H%M%S')}.md"
+            )
             if saga_theme:
                 saga_slug = _slugify(str(saga_theme)) or "saga"
                 relative_story_path = Path("stories") / saga_slug / timestamped_name
@@ -779,9 +785,9 @@ def process_story_task(
                 relative_story_path = Path("stories") / timestamped_name
 
         if not universe_context:
-            universe_context = _load_full_universe_context(project_path, project_id_int)
+            universe_context = _load_full_universe_context(project_path, project_id)
             context_tokens = writer_ai.count_tokens(universe_context)
-            _persist_context_token_count(project_id_int, context_tokens)
+            _persist_context_token_count(project_id, context_tokens)
 
         manager.update_task_status_by_db_id(
             task_db_id,
@@ -960,9 +966,7 @@ def generate_chapter_task(
         project = app_context.git_manager.get_project_from_db(project_id)
         project_path = Path(app_context.git_manager.resolve_project_path(project))
         models = load_project_ai_models(app_context.config, project_id)
-        _, writer_ai = get_ai_adapters(
-            app_context.config, project_id=project_id
-        )
+        _, writer_ai = get_ai_adapters(app_context.config, project_id=project_id)
 
         manager.update_task_status(
             celery_task_id,

@@ -16,10 +16,12 @@ from pydantic import ValidationError
 try:
     from frontmatter import FrontmatterError
 except ImportError:  # pragma: no cover - fallback
+
     class FrontmatterError(Exception):
         """Fallback error when python-frontmatter is unavailable."""
 
         pass
+
 
 from app.adapters.ai.base import BaseAIAdapter
 from app.adapters.git.base import GitAdapter
@@ -436,7 +438,9 @@ class ArchivistEngine:
 
         prepared = self._prepare_fact_entity(entity, entity_type)
         if prepared is None:
-            logger.warning("Unable to archive entity without a valid identifier: %s", entity)
+            logger.warning(
+                "Unable to archive entity without a valid identifier: %s", entity
+            )
             return None
 
         fact_entity, subfolder = prepared
@@ -517,9 +521,7 @@ class ArchivistEngine:
         if not isinstance(relationships_obj, dict):
             relationships_obj = {}
         relationships = {
-            str(key): str(value)
-            for key, value in relationships_obj.items()
-            if key
+            str(key): str(value) for key, value in relationships_obj.items() if key
         }
 
         attributes_obj = getattr(entity, "attributes", {}) or {}
@@ -816,17 +818,17 @@ def load_universe(repo_path: Path) -> FactGraph:
 
     entities_dir = repo_path / "Entities"
     if entities_dir.is_dir():
-        entity_paths = sorted(entities_dir.rglob('*.md'))
+        entity_paths = sorted(entities_dir.rglob("*.md"))
         for path in entity_paths:
             if not path.is_file():
                 continue
             try:
                 post = frontmatter.load(path)
             except (yaml.YAMLError, FrontmatterError) as exc:
-                logger.warning('Failed to parse entity front matter %s: %s', path, exc)
+                logger.warning("Failed to parse entity front matter %s: %s", path, exc)
                 continue
             except OSError as exc:
-                logger.warning('Failed to read entity file %s: %s', path, exc)
+                logger.warning("Failed to read entity file %s: %s", path, exc)
                 continue
 
             metadata = post.metadata or {}
@@ -835,20 +837,20 @@ def load_universe(repo_path: Path) -> FactGraph:
 
             missing_fields = [
                 key
-                for key in ('id', 'type', 'name')
-                if key not in metadata or not str(metadata.get(key) or '').strip()
+                for key in ("id", "type", "name")
+                if key not in metadata or not str(metadata.get(key) or "").strip()
             ]
             if missing_fields:
                 logger.warning(
-                    'Skipping entity file %s due to missing fields: %s',
+                    "Skipping entity file %s due to missing fields: %s",
                     path,
-                    ', '.join(missing_fields),
+                    ", ".join(missing_fields),
                 )
                 continue
 
-            entity_id = str(metadata.get('id')).strip()
-            raw_type = metadata.get('type')
-            type_key = str(raw_type or '').strip().lower()
+            entity_id = str(metadata.get("id")).strip()
+            raw_type = metadata.get("type")
+            type_key = str(raw_type or "").strip().lower()
 
             try:
                 relative_path = path.relative_to(entities_dir)
@@ -868,7 +870,7 @@ def load_universe(repo_path: Path) -> FactGraph:
                 (directory_hint, str(raw_type or directory_hint)),
             )[1]
 
-            raw_aliases = metadata.get('aliases', [])
+            raw_aliases = metadata.get("aliases", [])
             if isinstance(raw_aliases, list):
                 alias_candidates = raw_aliases
             elif raw_aliases:
@@ -876,12 +878,10 @@ def load_universe(repo_path: Path) -> FactGraph:
             else:
                 alias_candidates = []
             aliases = [
-                str(alias).strip()
-                for alias in alias_candidates
-                if str(alias).strip()
+                str(alias).strip() for alias in alias_candidates if str(alias).strip()
             ]
 
-            relationships_raw = metadata.get('relationships', {})
+            relationships_raw = metadata.get("relationships", {})
             if not isinstance(relationships_raw, dict):
                 relationships_raw = {}
             relationships = {
@@ -890,21 +890,21 @@ def load_universe(repo_path: Path) -> FactGraph:
                 if str(key).strip()
             }
 
-            attributes_raw = metadata.get('attributes', {})
+            attributes_raw = metadata.get("attributes", {})
             if not isinstance(attributes_raw, dict):
                 attributes_raw = {}
 
             additional_fields: dict[str, object] = {}
             for key, value in metadata.items():
                 if key in {
-                    'id',
-                    'type',
-                    'name',
-                    'aliases',
-                    'summary',
-                    'description',
-                    'relationships',
-                    'attributes',
+                    "id",
+                    "type",
+                    "name",
+                    "aliases",
+                    "summary",
+                    "description",
+                    "relationships",
+                    "attributes",
                 }:
                     continue
                 additional_fields[str(key)] = value
@@ -912,19 +912,25 @@ def load_universe(repo_path: Path) -> FactGraph:
             if additional_fields:
                 attributes_raw = {**attributes_raw, **additional_fields}
 
-            attributes_clean = {str(key): value for key, value in attributes_raw.items()}
+            attributes_clean = {
+                str(key): value for key, value in attributes_raw.items()
+            }
 
             summary = None
-            raw_summary = metadata.get('summary')
+            raw_summary = metadata.get("summary")
             if isinstance(raw_summary, str) and raw_summary.strip():
                 summary = raw_summary.strip()
 
-            content = post.content if isinstance(post.content, str) else str(post.content or '')
+            content = (
+                post.content
+                if isinstance(post.content, str)
+                else str(post.content or "")
+            )
             description = content.strip()
             if not description and summary:
                 description = summary
 
-            name = str(metadata.get('name')).strip()
+            name = str(metadata.get("name")).strip()
 
             try:
                 entity_index[entity_id] = FactEntity(
@@ -938,7 +944,9 @@ def load_universe(repo_path: Path) -> FactGraph:
                     attributes=attributes_clean,
                 )
             except ValidationError as exc:
-                logger.warning('Skipping entity file %s due to validation error: %s', path, exc)
+                logger.warning(
+                    "Skipping entity file %s due to validation error: %s", path, exc
+                )
                 continue
 
     if not entity_index:
@@ -948,7 +956,10 @@ def load_universe(repo_path: Path) -> FactGraph:
                 text = path.read_text(encoding="utf-8")
                 titles = re.findall(r"^#\s*(.+)", text, flags=re.MULTILINE)
                 entity_type = "place" if "place" in path.stem.lower() else "other"
-                attributes = {**_parse_front_matter(text), **_parse_attribute_block(text)}
+                attributes = {
+                    **_parse_front_matter(text),
+                    **_parse_attribute_block(text),
+                }
                 entity_id = _slugify(path.stem)
                 entity_index[entity_id] = FactEntity(
                     id=entity_id,
@@ -962,7 +973,10 @@ def load_universe(repo_path: Path) -> FactGraph:
             for path in sorted(legendy_dir.glob("*.md")):
                 text = path.read_text(encoding="utf-8")
                 titles = re.findall(r"^#\s*(.+)", text, flags=re.MULTILINE)
-                attributes = {**_parse_front_matter(text), **_parse_attribute_block(text)}
+                attributes = {
+                    **_parse_front_matter(text),
+                    **_parse_attribute_block(text),
+                }
                 entity_id = _slugify(path.stem)
                 if entity_id in entity_index:
                     continue

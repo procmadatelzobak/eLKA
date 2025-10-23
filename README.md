@@ -157,6 +157,7 @@ All changes pushed to or proposed against the `main` branch trigger the **Backen
 
 ## Testing the Universe Consistency Engine
 - Run `pytest elka-studio/backend/tests/test_uce_core.py` to execute deterministic unit tests covering fact extraction, universe loading, planner no-op detection, and Git application helpers.
+- The fact extractor now retries malformed JSON payloads and slugifies entity identifiers deterministically, ensuring local runs mirror CI expectations when adapters drift from the documented schema.
 - The suite provisions temporary Git repositories to simulate dry-run and apply flows, confirming that repeated runs emit explicit "no changes" notes instead of silently exiting.
 
 ## Testing task status updates
