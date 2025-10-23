@@ -5,19 +5,15 @@ from __future__ import annotations
 import json
 import re
 import unicodedata
-from typing import Any, Dict, Iterable
+import uuid
+from typing import Any, Dict, Iterable, List, Optional
 
 from pydantic import ValidationError
+from unidecode import unidecode
 
 from app.adapters.ai.base import BaseAIAdapter
 
-from .schemas import (
-    EntityType,
-    ExtractedData,
-    ExtractedEntity,
-    ExtractedEvent,
-    FactGraph,
-)
+from .schemas import ExtractedData, FactEntity, FactEvent, FactGraph
 
 
 def _slugify(text: str) -> str:
@@ -29,62 +25,243 @@ def _slugify(text: str) -> str:
     return cleaned or "item"
 
 
-def _normalise_entities(raw_entities: Iterable[Dict[str, Any]]) -> list[Dict[str, Any]]:
-    normalised: list[Dict[str, Any]] = []
-    for index, entity in enumerate(raw_entities):
-        item = dict(entity or {})
-        identifier = item.get("id") or item.get("name") or f"entity_{index}"
-        item["id"] = _slugify(str(identifier))
-        item.setdefault("type", "other")
-        item.setdefault("labels", [])
-        item.setdefault("attributes", {})
-        normalised.append(item)
-    return normalised
+def _generate_entity_id(entity_type: str, name: str) -> str:
+    """Generates a stable and unique ID for an entity."""
+
+    sanitized_name = unidecode(name).lower()
+    sanitized_name = re.sub(r"\s+", "_", sanitized_name)
+    sanitized_name = re.sub(r"[^a-z0-9_]+", "", sanitized_name)
+    sanitized_name = sanitized_name[:30]
+
+    short_uuid = str(uuid.uuid4())[:8]
+
+    return f"{entity_type.lower()}_{sanitized_name}_{short_uuid}"
 
 
-def _normalise_events(raw_events: Iterable[Dict[str, Any]]) -> list[Dict[str, Any]]:
-    normalised: list[Dict[str, Any]] = []
-    for index, event in enumerate(raw_events):
-        item = dict(event or {})
-        title = item.get("title") or item.get("name") or f"Event {index + 1}"
-        item["title"] = str(title).strip()
-        item["id"] = _slugify(item.get("id") or item["title"])
-        participants = [
-            _slugify(str(participant))
-            for participant in item.get("participants", [])
-            if str(participant).strip()
-        ]
-        item["participants"] = participants
-        location = item.get("location")
-        if isinstance(location, str) and location.strip():
-            item["location"] = _slugify(location)
-        description = item.get("description")
-        if isinstance(description, str):
-            item["description"] = description.strip()
-        normalised.append(item)
-    return normalised
+EXTRACTOR_SYSTEM_PROMPT = """
+You are an information extraction agent. Your task is to read the provided story text
+and extract all relevant entities: Characters, Locations, Events, Concepts, Items, and Misc.
 
+Respond ONLY with a JSON object containing lists for each entity type found.
+Each entity object MUST include:
+- "name": The primary name of the entity.
+- "type": The type of the entity. MUST be one of: "Character", "Location", "Event", "Concept", "Item", "Misc".
+- "description": A brief description based on the text.
+- "aliases": (Optional) A list of alternative names found in the text.
+- "summary": (Optional) A one-sentence summary.
+- "relationships": (Optional) A dictionary mapping related entity names (found in the text) to a description of the relationship.
 
-STRICT_FACT_GRAPH_TEMPLATE = """
-You are the Universe Consistency Extractor. Reply with JSON **only**.
-Return an object with exactly two keys: "entities" and "events".
-- "entities": array of objects with keys {"id", "type", "labels", "summary", "attributes"}.
-  Valid "type" values include person, place, artifact, organization, concept, material, event, other.
-- "events": array of objects with keys {"id", "title", "date", "location", "participants", "description"}.
-Match the field names exactly. Use slug-style identifiers (lowercase, underscore).
-Do not include markdown, code fences, explanations, or trailing text.
-Story follows between <story> markers. When <context> is present, ensure the
-extracted facts align with that lore and prefer identifiers already used in the
-context.
+DO NOT include an "id" field; it will be generated later.
+Focus on accuracy and completeness based ONLY on the provided text.
+
+Example JSON format:
+{
+  "characters": [
+    { "name": "Hubert Nahoda", "type": "Character", "description": "Uředník...", "aliases": ["Hubert"] },
+    { "name": "Edita Kvorova", "type": "Character", "description": "Vedoucí..." }
+  ],
+  "locations": [
+    { "name": "Ministerstvo Nepravděpodobnosti", "type": "Location", "description": "Instituce..." }
+  ],
+  "events": [],
+  "concepts": [],
+  "items": [],
+  "misc": []
+}
 """.strip()
 
 
-def _build_request_payload(story: str, context: str | None = None) -> str:
-    payload = STRICT_FACT_GRAPH_TEMPLATE
+_ENTITY_KEY_TO_TYPE: Dict[str, str] = {
+    "characters": "Character",
+    "locations": "Location",
+    "events": "Event",
+    "concepts": "Concept",
+    "items": "Item",
+    "misc": "Misc",
+}
+
+_ALLOWED_TYPE_LOOKUP: Dict[str, str] = {
+    canonical.lower(): canonical for canonical in _ENTITY_KEY_TO_TYPE.values()
+}
+
+
+def _build_user_prompt(story: str, context: Optional[str] = None) -> str:
+    sections: List[str] = []
     if context and context.strip():
-        payload += "\n<context>\n" + context.strip() + "\n</context>"
-    payload += "\n<story>\n" + story.strip() + "\n</story>"
-    return payload
+        sections.append("Context:\n" + context.strip())
+    sections.append("Story:\n" + story.strip())
+    return "\n\n".join(sections)
+
+
+def _normalise_aliases(value: Any) -> List[str]:
+    if isinstance(value, list):
+        return [str(alias).strip() for alias in value if str(alias).strip()]
+    if value:
+        alias = str(value).strip()
+        return [alias] if alias else []
+    return []
+
+
+def _normalise_relationships(value: Any) -> Dict[str, Any]:
+    if isinstance(value, dict):
+        return {str(key): relation for key, relation in value.items() if isinstance(key, str)}
+    return {}
+
+
+class ExtractorEngine:
+    """High-level engine for extracting structured entities from stories."""
+
+    def __init__(
+        self,
+        ai_adapter: BaseAIAdapter,
+        *,
+        model_overrides: Dict[str, str] | None = None,
+    ) -> None:
+        self.ai_adapter = ai_adapter
+        self._model_overrides = model_overrides or {}
+
+    def extract(
+        self,
+        story_text: str,
+        *,
+        universe_context: str | None = None,
+        model_key: str | None = None,
+    ) -> tuple[ExtractedData, Dict[str, int] | None]:
+        """Extract entities from ``story_text`` and return structured data."""
+
+        if not story_text.strip():
+            raise ValueError("Story text must not be empty for extraction.")
+
+        user_prompt = _build_user_prompt(story_text, universe_context)
+        raw_result, tokens = self._invoke_model(user_prompt, model_key)
+        llm_result = self._coerce_result(raw_result)
+        processed_payload = self._post_process(llm_result)
+
+        try:
+            parsed_data = ExtractedData(**processed_payload)
+        except ValidationError as exc:  # pragma: no cover - adapter specific
+            raise ValueError(
+                "Pydantic validation failed after adding IDs"
+            ) from exc
+
+        return parsed_data, tokens
+
+    def _invoke_model(
+        self,
+        user_prompt: str,
+        model_key: str | None,
+    ) -> tuple[Any, Dict[str, int] | None]:
+        resolved_model = model_key or self._model_overrides.get("extraction")
+        tokens: Dict[str, int] | None = None
+
+        if hasattr(self.ai_adapter, "generate_json"):
+            try:
+                if resolved_model:
+                    result, tokens = self.ai_adapter.generate_json(
+                        EXTRACTOR_SYSTEM_PROMPT,
+                        user_prompt,
+                        model_key=resolved_model,
+                    )
+                else:
+                    result, tokens = self.ai_adapter.generate_json(
+                        EXTRACTOR_SYSTEM_PROMPT,
+                        user_prompt,
+                    )
+            except TypeError:
+                result, tokens = self.ai_adapter.generate_json(
+                    EXTRACTOR_SYSTEM_PROMPT,
+                    user_prompt,
+                )
+            return result, tokens
+
+        if hasattr(self.ai_adapter, "generate_text"):
+            prompt = f"{EXTRACTOR_SYSTEM_PROMPT}\n\n{user_prompt}"
+            try:
+                if resolved_model:
+                    result, tokens = self.ai_adapter.generate_text(
+                        prompt,
+                        model_key=resolved_model,
+                    )
+                else:
+                    result, tokens = self.ai_adapter.generate_text(prompt)
+            except TypeError:
+                result, tokens = self.ai_adapter.generate_text(prompt)
+            return result, tokens
+
+        raise RuntimeError("AI adapter does not support JSON extraction.")
+
+    def _coerce_result(self, payload: Any) -> Dict[str, Any]:
+        if isinstance(payload, dict):
+            return payload
+        if isinstance(payload, str):
+            return json.loads(payload)
+        raise TypeError("Extractor returned non-string payload")
+
+    def _post_process(self, llm_result: Dict[str, Any]) -> Dict[str, List[Dict[str, Any]]]:
+        processed: Dict[str, List[Dict[str, Any]]] = {
+            key: [] for key in _ENTITY_KEY_TO_TYPE
+        }
+
+        normalised_keys: Dict[str, Any] = {}
+        for key, value in llm_result.items():
+            if isinstance(key, str):
+                lowered = key.lower()
+                if lowered in _ENTITY_KEY_TO_TYPE:
+                    normalised_keys[lowered] = value
+
+        for key, canonical_type in _ENTITY_KEY_TO_TYPE.items():
+            raw_entities = normalised_keys.get(key, [])
+            if not isinstance(raw_entities, Iterable) or isinstance(
+                raw_entities, (str, bytes)
+            ):
+                continue
+            for raw_entity in raw_entities:
+                entity_payload = self._normalise_entity(raw_entity, canonical_type)
+                if entity_payload:
+                    processed[key].append(entity_payload)
+        return processed
+
+    def _normalise_entity(
+        self, raw_entity: Any, canonical_type: str
+    ) -> Optional[Dict[str, Any]]:
+        if not isinstance(raw_entity, dict):
+            print(f"Skipping incomplete entity data: {raw_entity}")
+            return None
+
+        name = str(raw_entity.get("name", "")).strip()
+        if not name:
+            print(f"Skipping incomplete entity data: {raw_entity}")
+            return None
+
+        raw_type = raw_entity.get("type")
+        resolved_type = canonical_type
+        if isinstance(raw_type, str) and raw_type.strip():
+            candidate = _ALLOWED_TYPE_LOOKUP.get(raw_type.strip().lower())
+            if candidate:
+                resolved_type = candidate
+        aliases = _normalise_aliases(raw_entity.get("aliases"))
+        description = raw_entity.get("description")
+        if isinstance(description, str):
+            description = description.strip() or None
+        else:
+            description = None
+        summary = raw_entity.get("summary")
+        if isinstance(summary, str):
+            summary = summary.strip() or None
+        else:
+            summary = None
+        relationships = _normalise_relationships(raw_entity.get("relationships"))
+
+        entity_payload: Dict[str, Any] = {
+            "id": _generate_entity_id(resolved_type, name),
+            "type": resolved_type,
+            "name": name,
+            "description": description,
+            "summary": summary,
+            "aliases": aliases,
+            "relationships": relationships,
+        }
+        return entity_payload
 
 
 def extract_fact_graph(
@@ -93,88 +270,38 @@ def extract_fact_graph(
     context: str | None = None,
     *,
     model_key: str | None = None,
+    model_overrides: Dict[str, str] | None = None,
 ) -> FactGraph:
     """Use the AI adapter to convert a story into a :class:`FactGraph`."""
 
-    base_prompt = _build_request_payload(story, context=context)
-    prompts = [base_prompt]
+    engine = ExtractorEngine(ai_adapter=ai, model_overrides=model_overrides)
+    extracted_data, _ = engine.extract(
+        story,
+        universe_context=context,
+        model_key=model_key,
+    )
 
-    last_error: Exception | None = None
-    retry_prompt_used = False
-    while prompts:
-        prompt = prompts.pop(0)
-        result: Any
-        if hasattr(ai, "generate_json"):
-            system_prompt = (
-                "You are a precise information extraction engine. "
-                "Respond with compact JSON matching the requested schema."
+    entities: List[FactEntity] = []
+    for key in ("characters", "locations", "concepts", "items", "misc"):
+        entities.extend(getattr(extracted_data, key))
+
+    events: List[FactEvent] = []
+    for event_entity in extracted_data.events:
+        participants = (
+            list(event_entity.relationships.keys())
+            if event_entity.relationships
+            else []
+        )
+        events.append(
+            FactEvent(
+                id=event_entity.id,
+                title=event_entity.name,
+                description=event_entity.description or event_entity.summary,
+                participants=participants,
             )
-            try:
-                try:
-                    result, _ = ai.generate_json(
-                        system_prompt, prompt, model_key=model_key
-                    )  # type: ignore[arg-type]
-                except TypeError:
-                    result, _ = ai.generate_json(  # type: ignore[arg-type]
-                        system_prompt, prompt
-                    )
-            except Exception as exc:  # pragma: no cover - adapter specific
-                last_error = exc
-                continue
-        else:
-            result = ai.analyse(prompt, aspect="extraction", context=context)
+        )
 
-        try:
-            if isinstance(result, dict):
-                data = result
-            else:
-                if not isinstance(result, str):
-                    raise TypeError("Extractor returned non-string payload")
-                data = json.loads(result)
-            entities = _normalise_entities(data.get("entities", []))
-            events = _normalise_events(data.get("events", []))
-            graph = FactGraph(entities=entities, events=events)
-            return graph
-        except ValidationError as exc:
-            last_error = exc
-            if not retry_prompt_used:
-                retry_prompt_used = True
-                prompts.append("Return ONLY JSON.\n" + base_prompt)
-            continue
-        except (json.JSONDecodeError, TypeError, ValueError) as exc:
-            last_error = exc
-            if not retry_prompt_used:
-                retry_prompt_used = True
-                prompts.append("Return ONLY JSON.\n" + base_prompt)
-            continue
-
-    raise ValueError(f"Extractor failed to return valid JSON: {last_error}")
-
-
-def _map_entity_type(raw_type: str) -> EntityType:
-    normalised = (raw_type or "").strip().lower()
-    if normalised in {"person", "character", "being", "creature", "hero", "villain"}:
-        return EntityType.CHARACTER
-    if normalised in {"place", "location", "region", "area", "planet", "realm"}:
-        return EntityType.LOCATION
-    if normalised in {"event", "incident", "battle", "ceremony"}:
-        return EntityType.EVENT
-    if normalised in {"concept", "idea", "philosophy", "belief"}:
-        return EntityType.CONCEPT
-    if normalised in {"artifact", "item", "object", "device", "thing"}:
-        return EntityType.ITEM
-    if normalised in {"material", "substance", "element", "alloy"}:
-        return EntityType.MATERIAL
-    if normalised in {
-        "organization",
-        "organisation",
-        "faction",
-        "guild",
-        "order",
-        "clan",
-    }:
-        return EntityType.ORGANIZATION
-    return EntityType.OTHER
+    return FactGraph(entities=entities, events=events)
 
 
 def extract_story_entities(
@@ -183,52 +310,24 @@ def extract_story_entities(
     universe_context: str | None = None,
     *,
     model_key: str | None = None,
+    model_overrides: Dict[str, str] | None = None,
 ) -> ExtractedData:
     """Extract structured entity data suitable for archival."""
 
-    fact_graph = extract_fact_graph(
-        story, ai, context=universe_context, model_key=model_key
+    engine = ExtractorEngine(ai_adapter=ai, model_overrides=model_overrides)
+    extracted_data, _ = engine.extract(
+        story,
+        universe_context=universe_context,
+        model_key=model_key,
     )
-    data = ExtractedData()
-
-    for entity in fact_graph.entities:
-        entity_type = _map_entity_type(entity.type)
-        display_name = entity.summary or entity.id.replace("_", " ").title()
-        extracted = ExtractedEntity(
-            id=entity.id,
-            name=display_name,
-            summary=entity.summary,
-            description=entity.attributes.get("description") or entity.summary,
-            aliases=list(entity.labels),
-            attributes=dict(entity.attributes),
-            entity_type=entity_type,
-        )
-        if entity_type == EntityType.CHARACTER:
-            data.characters.append(extracted)
-        elif entity_type == EntityType.LOCATION:
-            data.locations.append(extracted)
-        elif entity_type == EntityType.CONCEPT:
-            data.concepts.append(extracted)
-        elif entity_type == EntityType.ITEM:
-            data.things.append(extracted)
-        elif entity_type == EntityType.MATERIAL:
-            data.materials.append(extracted)
-        else:
-            data.others.append(extracted)
-
-    for event in fact_graph.events:
-        extracted_event = ExtractedEvent(
-            id=event.id,
-            name=event.title,
-            summary=event.description,
-            description=event.description,
-            date=event.date,
-            location=event.location,
-            participants=list(event.participants),
-        )
-        data.events.append(extracted_event)
-
-    return data
+    return extracted_data
 
 
-__all__ = ["extract_fact_graph", "extract_story_entities", "_slugify"]
+__all__ = [
+    "ExtractorEngine",
+    "EXTRACTOR_SYSTEM_PROMPT",
+    "extract_fact_graph",
+    "extract_story_entities",
+    "_generate_entity_id",
+    "_slugify",
+]

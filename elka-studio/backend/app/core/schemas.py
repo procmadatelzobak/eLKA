@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from enum import Enum
-from typing import Dict, List, Literal, Optional
+from typing import Any, Dict, List, Literal, Optional
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -21,40 +21,23 @@ class FactEntity(BaseModel):
         "Concept",
         "Item",
         "Misc",
-        "Organization",
-        "Material",
-        "person",
-        "place",
-        "artifact",
-        "organization",
-        "concept",
-        "material",
-        "event",
-        "other",
     ] = Field(..., description="Categorised entity type")
-    name: Optional[str] = Field(
-        default=None, description="Primary human-readable name for the entity"
-    )
-    summary: Optional[str] = Field(default=None, description="Short description")
+    name: str = Field(..., description="Primary human-readable name for the entity")
     description: Optional[str] = Field(
         default=None, description="Detailed Markdown description"
     )
     aliases: List[str] = Field(
         default_factory=list,
-        alias="labels",
         description="Alternative names and identifiers",
     )
-    relationships: Dict[str, str] = Field(
+    summary: Optional[str] = Field(default=None, description="Short description")
+    relationships: Dict[str, Any] = Field(
         default_factory=dict,
-        description="Relationships to other entities keyed by identifier",
+        description="Relationships to other entities keyed by name",
     )
-    attributes: Dict[str, str] = Field(
-        default_factory=dict, description="Key-value facts and metadata"
+    attributes: Dict[str, Any] = Field(
+        default_factory=dict, description="Additional metadata for compatibility"
     )
-
-    @property
-    def labels(self) -> List[str]:  # pragma: no cover - compatibility shim
-        return self.aliases
 
 
 class FactEvent(BaseModel):
@@ -126,25 +109,29 @@ class EntityType(str, Enum):
     OTHER = "other"
 
 
-class ExtractedEntity(BaseModel):
-    """Structured representation of an entity extracted from a story."""
+class ExtractedEntity(FactEntity):  # pragma: no cover - backwards compatibility
+    """Legacy wrapper maintained for backwards compatibility."""
 
-    id: str
-    name: str
-    summary: Optional[str] = None
-    description: Optional[str] = None
-    aliases: List[str] = Field(default_factory=list)
-    attributes: Dict[str, str] = Field(default_factory=dict)
-    entity_type: EntityType = Field(default=EntityType.OTHER)
+    @property
+    def entity_type(self) -> EntityType:
+        try:
+            return EntityType(self.type.lower())
+        except ValueError:
+            return EntityType.OTHER
+
+    @entity_type.setter
+    def entity_type(self, value: EntityType | str) -> None:
+        if isinstance(value, EntityType):
+            resolved = value.value
+        else:
+            resolved = str(value).lower()
+        canonical = resolved.capitalize() if resolved else "Misc"
+        object.__setattr__(self, "type", canonical)
 
 
-class ExtractedEvent(BaseModel):
-    """Structured representation of an event extracted from a story."""
+class ExtractedEvent(FactEntity):  # pragma: no cover - backwards compatibility
+    """Legacy wrapper for event records with optional structured metadata."""
 
-    id: str
-    name: str
-    summary: Optional[str] = None
-    description: Optional[str] = None
     date: Optional[str] = None
     location: Optional[str] = None
     participants: List[str] = Field(default_factory=list)
@@ -153,13 +140,24 @@ class ExtractedEvent(BaseModel):
 class ExtractedData(BaseModel):
     """Aggregate container for all extracted story entities and events."""
 
-    characters: List[ExtractedEntity] = Field(default_factory=list)
-    locations: List[ExtractedEntity] = Field(default_factory=list)
-    events: List[ExtractedEvent] = Field(default_factory=list)
-    concepts: List[ExtractedEntity] = Field(default_factory=list)
-    things: List[ExtractedEntity] = Field(default_factory=list)
-    materials: List[ExtractedEntity] = Field(default_factory=list)
-    others: List[ExtractedEntity] = Field(default_factory=list)
+    characters: List[FactEntity] = Field(default_factory=list)
+    locations: List[FactEntity] = Field(default_factory=list)
+    events: List[FactEntity] = Field(default_factory=list)
+    concepts: List[FactEntity] = Field(default_factory=list)
+    items: List[FactEntity] = Field(default_factory=list)
+    misc: List[FactEntity] = Field(default_factory=list)
+
+    @property
+    def things(self) -> List[FactEntity]:  # pragma: no cover - compatibility shim
+        return self.items
+
+    @property
+    def materials(self) -> List[FactEntity]:  # pragma: no cover - compatibility shim
+        return [entity for entity in self.misc if entity.type.lower() == "material"]
+
+    @property
+    def others(self) -> List[FactEntity]:  # pragma: no cover - compatibility shim
+        return self.misc
 
 
 class TaskType(str, Enum):
