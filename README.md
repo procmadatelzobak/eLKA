@@ -42,7 +42,7 @@ For the detailed specification, please see the [**eLKA Universe Data Standard (U
 ## Quick Start
 1. Clone the repository: `git clone <repo-url> && cd elka-studio`
 2. Install everything with `make setup` (see `scripts/install.sh` for details).
-   The installer verifies required system packages (Python, npm, Redis, etc.) and will attempt to install any missing dependencies automatically. Be ready to enter your administrator password if prompted.
+   The installer verifies required system packages (Python, npm, Redis, etc.) and will attempt to install any missing dependencies automatically. Be ready to enter your administrator password if prompted. Python form uploads rely on [`python-multipart`](https://github.com/Kludex/python-multipart), which is now included in both the backend and root requirements so Celery and FastAPI can load routes that accept `multipart/form-data` payloads (such as the bulk story importer) without runtime errors.
 3. Create `config.yml` (copy `config.yml.example`) and update the `security.secret_key` value. Use the suggested `SECRET_KEY` printed by the installer or generate your own random string.
 4. Launch the stack with `make run-dev`. The command starts the FastAPI server, Celery worker, Redis, and the Vite frontend on [http://localhost:5173](http://localhost:5173).
 5. Need only the backend APIs? Run `make run-backend` to skip the frontend server.

@@ -8,3 +8,4 @@ redis
 limits
 sqlalchemy
 uvicorn[standard]
+python-multipart

@@ -8,6 +8,7 @@ redis
 limits
 sqlalchemy
 uvicorn[standard]
+python-multipart
 google-genai>=0.3.0
 
 google-generativeai
