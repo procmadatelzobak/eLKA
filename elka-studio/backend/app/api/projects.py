@@ -406,23 +406,77 @@ async def import_stories(
             detail="No valid files were saved.",
         )
 
+    story_contents_to_process: list[str] = []
+    header_end_marker = "\n\nObsah:\n"
+
+    for file_rel_path in saved_file_paths:
+        absolute_path = project_path / file_rel_path
+        try:
+            content = absolute_path.read_text(encoding="utf-8")
+        except Exception as exc:  # pragma: no cover - filesystem dependent
+            logger.error(
+                "Failed to read content of imported file %s: %s",
+                file_rel_path,
+                exc,
+            )
+            continue
+
+        header_end_pos = content.find(header_end_marker)
+        if header_end_pos != -1 and header_end_pos < 500:
+            content = content[header_end_pos + len(header_end_marker) :].strip()
+        else:
+            content = content.strip()
+
+        if not content:
+            logger.warning(
+                "Imported file %s contained no story content after preprocessing.",
+                file_rel_path,
+            )
+            continue
+
+        story_contents_to_process.append(content)
+
+    if not story_contents_to_process:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=(
+                "No valid file contents could be read for processing."
+            ),
+        )
+
+    first_story_content = story_contents_to_process[0]
+    remaining_contents = story_contents_to_process[1:]
+
+    rewrite_prompt = (
+        "Please rewrite the following story text faithfully. Maintain the "
+        "original language, style, and all narrative details. Omit any "
+        "non-narrative headers or metadata present at the beginning. Just "
+        "output the clean story text:"
+    )
+
+    logger.info(
+        "Starting sequential regeneration for %s imported stories in project %s.",
+        len(story_contents_to_process),
+        project_id,
+    )
+
     manager = TaskManager()
-    first_file_path, *remaining_files = saved_file_paths
 
     try:
         manager.create_task(
             project_id=project_id,
-            task_type="uce_process_story_task",
+            task_type="rewrite_import_story_task",
             params={
                 "project_id": project_id,
-                "story_file_path": first_file_path,
-                "remaining_story_filenames": remaining_files,
-                "apply": False,
+                "seed": f"{rewrite_prompt}\n\n---\n\n{first_story_content}",
+                "task_type_hint": "rewrite_import",
+                "remaining_story_contents": remaining_contents,
+                "uce_apply": False,
             },
         )
     except Exception as exc:  # pragma: no cover - task scheduling dependent
         logger.exception(
-            "Failed to schedule UCE processing for imported stories in project %s: %s",
+            "Failed to schedule regeneration for imported stories in project %s: %s",
             project_id,
             exc,
         )
@@ -432,7 +486,9 @@ async def import_stories(
         ) from exc
 
     return {
-        "message": f"{len(saved_file_paths)} files uploaded and processing started.",
+        "message": (
+            f"{len(saved_file_paths)} files uploaded. Regeneration and processing started."
+        ),
         "import_directory": str(import_batch_dir.relative_to(project_path)),
     }
 
