@@ -136,6 +136,7 @@ All changes pushed to or proposed against the `main` branch trigger the **Backen
 
 - `POST /api/tasks/story/process` accepts `{ project_id, story_text, apply? }`. The default **DRY-RUN** mode always stores the diff in the task record.
 - The legends (`Legends/*.md`) and the template `templates/universe_scaffold/Legends/CORE_TRUTHS.md` are automatically loaded during validation.
+- Missing entities discovered during story imports now register as informational notes, and legend breaches only block the run when paired with critical conflicts (for example `entity_type_conflict`). This allows empty universes to accept new canon while still surfacing actionable audit logs.
 - Validation and entity extraction now reuse the in-memory universe context string directly, ensuring the Gemini validator and extractor stay aware of the complete lore set without relying on file-path hints.
 - Extractor retries now log raw provider responses when JSON decoding fails, detect incomplete payloads, and rely on a simplified fence-stripping JSON cleaner to avoid overzealous parsing.
 - The planner reconciles entities primarily by their stable IDs and only calls the AI matcher for ambiguous cases, reducing the risk of duplicate records when stories are reprocessed.

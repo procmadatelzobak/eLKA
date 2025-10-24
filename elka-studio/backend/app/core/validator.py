@@ -211,7 +211,7 @@ def _validate_missing_entities(
             if participant not in known:
                 issues.append(
                     ConsistencyIssue(
-                        level="error",
+                        level="info",
                         code="missing_entity",
                         message=(
                             f"Event '{event.title}' references unknown participant '{participant}'."
@@ -222,7 +222,7 @@ def _validate_missing_entities(
         if event.location and event.location not in known:
             issues.append(
                 ConsistencyIssue(
-                    level="error",
+                    level="info",
                     code="missing_entity",
                     message=(
                         f"Event '{event.title}' references unknown location '{event.location}'."
