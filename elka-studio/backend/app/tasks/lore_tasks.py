@@ -605,11 +605,12 @@ def uce_process_story_task(
                 logger.info(f"Task {celery_task_id}: Chaining next story processing for: {next_story_filename}")
                 # Spustíme další task v řetězu se zmenšeným seznamem
                 uce_process_story_task.delay(
+                    task_db_id,
                     project_id=project_id,
-                    token=token, 
+                    token=token,
                     file_path=next_story_filename,
                     remaining_story_filenames=new_remaining_list,
-                    parent_task_id=parent_task_id 
+                    parent_task_id=parent_task_id,
                 )
             else:
                 logger.error(f"Task {celery_task_id}: Cannot chain next task. Missing project_id or next_filename. Remaining: {remaining_story_filenames}")
