@@ -20,7 +20,7 @@ from ..db.session import get_session
 from ..models.project import Project
 from ..models.task import Task
 from ..services.git_manager import GitManager
-from ..services.task_manager import TaskManager
+from ..tasks import uce_process_story_task
 from ..utils.config import load_config
 from ..utils.filesystem import sanitize_filename
 from ..utils.security import decrypt, encrypt, get_secret_key
@@ -401,82 +401,52 @@ async def import_stories(
             await upload.close()
 
     if not saved_file_paths:
+        logger.warning(
+            "No valid files were saved for project %s import.",
+            project_id,
+        )
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="No valid files were saved.",
         )
 
-    story_contents_to_process: list[str] = []
-    header_end_marker = "\n\nObsah:\n"
-
-    for file_rel_path in saved_file_paths:
-        absolute_path = project_path / file_rel_path
+    token: str | None = None
+    if project.git_token:
         try:
-            content = absolute_path.read_text(encoding="utf-8")
-        except Exception as exc:  # pragma: no cover - filesystem dependent
-            logger.error(
-                "Failed to read content of imported file %s: %s",
-                file_rel_path,
-                exc,
+            secret_key = get_secret_key()
+            token = decrypt(project.git_token, secret_key)
+        except Exception as exc:  # pragma: no cover - defensive branch
+            logger.exception(
+                "Failed to decrypt git token for project %s during import.",
+                project_id,
             )
-            continue
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Unable to decrypt stored Git token.",
+            ) from exc
 
-        header_end_pos = content.find(header_end_marker)
-        if header_end_pos != -1 and header_end_pos < 500:
-            content = content[header_end_pos + len(header_end_marker) :].strip()
-        else:
-            content = content.strip()
-
-        if not content:
-            logger.warning(
-                "Imported file %s contained no story content after preprocessing.",
-                file_rel_path,
-            )
-            continue
-
-        story_contents_to_process.append(content)
-
-    if not story_contents_to_process:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=(
-                "No valid file contents could be read for processing."
-            ),
-        )
-
-    first_story_content = story_contents_to_process[0]
-    remaining_contents = story_contents_to_process[1:]
-
-    rewrite_prompt = (
-        "Please rewrite the following story text faithfully. Maintain the "
-        "original language, style, and all narrative details. Omit any "
-        "non-narrative headers or metadata present at the beginning. Just "
-        "output the clean story text:"
-    )
+    first_file_path = saved_file_paths[0]
+    remaining_files = saved_file_paths[1:]
+    parent_task_id = None
 
     logger.info(
-        "Starting sequential regeneration for %s imported stories in project %s.",
-        len(story_contents_to_process),
+        "Starting sequential UCE processing for %s imported files for project %s. First file: %s",
+        len(saved_file_paths),
         project_id,
+        first_file_path,
     )
 
-    manager = TaskManager()
-
     try:
-        manager.create_task(
+        uce_process_story_task.delay(
             project_id=project_id,
-            task_type="rewrite_import_story_task",
-            params={
-                "project_id": project_id,
-                "seed": f"{rewrite_prompt}\n\n---\n\n{first_story_content}",
-                "task_type_hint": "rewrite_import",
-                "remaining_story_contents": remaining_contents,
-                "uce_apply": False,
-            },
+            token=token,
+            file_path=first_file_path,
+            remaining_story_filenames=remaining_files,
+            parent_task_id=parent_task_id,
         )
     except Exception as exc:  # pragma: no cover - task scheduling dependent
         logger.exception(
-            "Failed to schedule regeneration for imported stories in project %s: %s",
+            "Failed to schedule UCE processing for imported stories in project %s: %s",
             project_id,
             exc,
         )
@@ -487,7 +457,7 @@ async def import_stories(
 
     return {
         "message": (
-            f"{len(saved_file_paths)} files uploaded. Regeneration and processing started."
+            f"{len(saved_file_paths)} files uploaded and processing started."
         ),
         "import_directory": str(import_batch_dir.relative_to(project_path)),
     }

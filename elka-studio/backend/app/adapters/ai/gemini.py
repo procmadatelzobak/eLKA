@@ -10,7 +10,7 @@ from typing import Any, Dict
 
 from celery.exceptions import MaxRetriesExceededError, Retry
 from google import genai
-from google.api_core.exceptions import ResourceExhausted
+from google.api_core import exceptions as google_exceptions
 from google.genai.errors import ClientError
 from limits import RateLimitItemPerMinute
 from limits.storage import MemoryStorage, RedisStorage
@@ -159,25 +159,87 @@ class GeminiAdapter(BaseAIAdapter):
     ) -> tuple[str, dict | None]:
         model_name = self._resolve_model(model_key)
         self._wait_for_rate_limit()
-        try:
-            response = self._client.models.generate_content(
-                model=model_name, contents=prompt
-            )
-        except (ResourceExhausted, ClientError) as exc:
-            self._handle_rate_limit(exc, operation="text generation")
+
+        max_retries = 3
+        base_delay = 60
+        last_exception: Exception | None = None
+
+        for attempt in range(max_retries):
+            try:
+                response = self._client.models.generate_content(
+                    model=model_name, contents=prompt
+                )
+                metadata = self._extract_usage_metadata(response)
+                return getattr(response, "text", ""), metadata
+            except google_exceptions.ResourceExhausted as exc:
+                last_exception = exc
+                delay = base_delay * (2**attempt)
+                self.logger.warning(
+                    "Gemini reported ResourceExhausted (attempt %s/%s): %s. Retrying in %s seconds...",
+                    attempt + 1,
+                    max_retries,
+                    exc,
+                    delay,
+                )
+                if attempt < max_retries - 1:
+                    time.sleep(delay)
+            except (
+                google_exceptions.ServiceUnavailable,
+                google_exceptions.DeadlineExceeded,
+            ) as exc:
+                last_exception = exc
+                delay = base_delay * (2**attempt)
+                self.logger.warning(
+                    "Gemini transient error (attempt %s/%s): %s. Retrying in %s seconds...",
+                    attempt + 1,
+                    max_retries,
+                    exc,
+                    delay,
+                )
+                if attempt < max_retries - 1:
+                    time.sleep(delay)
+            except ClientError as exc:
+                if self._is_rate_limit_error(exc):
+                    last_exception = exc
+                    delay = base_delay * (2**attempt)
+                    self.logger.warning(
+                        "Gemini client error indicating overload (attempt %s/%s): %s. Retrying in %s seconds...",
+                        attempt + 1,
+                        max_retries,
+                        exc,
+                        delay,
+                    )
+                    if attempt < max_retries - 1:
+                        time.sleep(delay)
+                else:
+                    raise
+            except Exception as exc:
+                if isinstance(exc, Retry):
+                    raise exc
+                logger.error(
+                    "Unexpected error during Gemini text generation: %s",
+                    exc,
+                    exc_info=True,
+                )
+                raise
+
+        self.logger.error(
+            "Failed to generate text after %s attempts due to Gemini errors.",
+            max_retries,
+        )
+
+        if isinstance(last_exception, ClientError) and last_exception is not None:
+            self._handle_rate_limit(last_exception, operation="text generation")
             return "", None
-        except Exception as exc:
-            # Allow Celery retry exceptions to propagate without logging.
-            if isinstance(exc, Retry):
-                raise exc
-            logger.error(
-                "Unexpected error during Gemini text generation: %s",
-                exc,
-                exc_info=True,
-            )
-            raise
-        metadata = self._extract_usage_metadata(response)
-        return getattr(response, "text", ""), metadata
+
+        if isinstance(last_exception, google_exceptions.ResourceExhausted):
+            self._handle_rate_limit(last_exception, operation="text generation")
+            return "", None
+
+        if last_exception is not None:
+            raise last_exception
+
+        raise RuntimeError("Gemini text generation failed without a captured exception")
 
     def analyse(
         self,
@@ -206,7 +268,7 @@ class GeminiAdapter(BaseAIAdapter):
             response = self._client.models.generate_content(
                 model=self._resolve_model(), contents=prompt
             )
-        except (ResourceExhausted, ClientError) as exc:
+        except (google_exceptions.ResourceExhausted, ClientError) as exc:
             self._handle_rate_limit(exc, operation="analysis")
             return str(exc)
         except Exception as exc:
@@ -272,66 +334,127 @@ class GeminiAdapter(BaseAIAdapter):
         """Return JSON-formatted text by combining system and user prompts."""
 
         prompt = f"{system}\n\n{user}"
-        try:
-            raw_response, tokens = self.generate_text(prompt, model_key=model_key)
-        except (ResourceExhausted, ClientError) as exc:
-            self._handle_rate_limit(exc, operation="JSON generation")
-            return {}, None
-        except Exception as exc:
-            # Allow Celery retry exceptions to propagate without logging.
-            if isinstance(exc, Retry):
-                raise exc
-            logger.error(
-                "Unexpected error during Gemini JSON generation: %s",
-                exc,
-                exc_info=True,
-            )
-            raise
-        try:
-            raw_response_text = (
-                raw_response
-                if isinstance(raw_response, str)
-                else ("" if raw_response is None else str(raw_response))
-            )
-            text = self._clean_json_response(raw_response_text)
+        max_retries = 3
+        base_delay = 60
+        last_exception: Exception | None = None
 
-            # --- PŘIDANÉ DEFINITIVNÍ LOGOVÁNÍ ---
-            self.logger.info(f"--- DEBUG JSON PARSING ---")
-            self.logger.info(
-                f"Raw response snippet: {raw_response_text[:200]}..."
-            )
-            self.logger.info(f"Cleaned text snippet: {text[:200]}...")
-            self.logger.info(f"Cleaned text length: {len(text)}")
-            self.logger.info(
-                f"Cleaned text repr(): {repr(text[:200])}..."
-            )
-            if not text:
-                self.logger.error(
-                    "CRITICAL: Cleaned JSON string IS EMPTY before parsing!"
+        for attempt in range(max_retries):
+            try:
+                raw_response, tokens = self.generate_text(prompt, model_key=model_key)
+                raw_response_text = (
+                    raw_response
+                    if isinstance(raw_response, str)
+                    else ("" if raw_response is None else str(raw_response))
                 )
-            elif not (text.startswith("{") or text.startswith("[")):
-                self.logger.error(
-                    f"CRITICAL: Cleaned JSON string does NOT start with '{{' or '['. Starts with char code: {ord(text[0]) if text else 'N/A'}"
-                )
-            else:
-                self.logger.info("Cleaned text seems to start correctly.")
-            self.logger.info(f"--- END DEBUG JSON PARSING ---")
-            # --- KONEC PŘIDANÉHO LOGOVÁNÍ ---
 
-            parsed = json.loads(text)
-        except json.JSONDecodeError as exc:
-            error_message = f"Failed to decode JSON from Gemini: {text}"
-            logger.error(error_message)
-            raise ValueError(error_message) from exc
-        except Exception as exc:  # pragma: no cover - defensive logging
-            if isinstance(exc, Retry):
+                text = self._clean_json_response(raw_response_text)
+
+                self.logger.debug(
+                    "[Attempt %s/%s] Cleaned JSON length: %s",
+                    attempt + 1,
+                    max_retries,
+                    len(text),
+                )
+                if not text:
+                    self.logger.error(
+                        "[Attempt %s/%s] Cleaned JSON string is empty before parsing. Raw snippet: %s...",
+                        attempt + 1,
+                        max_retries,
+                        raw_response_text[:200],
+                    )
+                    raise json.JSONDecodeError("Cleaned JSON string is empty", "", 0)
+                if not (text.startswith("{") or text.startswith("[")):
+                    self.logger.error(
+                        "[Attempt %s/%s] Cleaned JSON string does not start with '{{' or '['. Starts with: %s",
+                        attempt + 1,
+                        max_retries,
+                        text[:20],
+                    )
+                    raise json.JSONDecodeError(
+                        "Cleaned JSON does not start correctly",
+                        text,
+                        0,
+                    )
+
+                parsed = json.loads(text)
+                self.logger.info(
+                    "Successfully generated and parsed JSON on attempt %s",
+                    attempt + 1,
+                )
+                return parsed, tokens
+            except (
+                google_exceptions.ResourceExhausted,
+                google_exceptions.ServiceUnavailable,
+                google_exceptions.DeadlineExceeded,
+            ) as exc:
+                last_exception = exc
+                delay = base_delay * (2**attempt)
+                self.logger.warning(
+                    "Gemini API error during JSON generation (attempt %s/%s): %s. Retrying in %s seconds...",
+                    attempt + 1,
+                    max_retries,
+                    exc,
+                    delay,
+                )
+                if attempt < max_retries - 1:
+                    time.sleep(delay)
+            except (json.JSONDecodeError, ValueError) as exc:
+                last_exception = exc
+                delay = base_delay * (2**attempt) / 2
+                self.logger.warning(
+                    "JSON processing error (attempt %s/%s): %s. Retrying in %s seconds...",
+                    attempt + 1,
+                    max_retries,
+                    exc,
+                    delay,
+                )
+                if attempt < max_retries - 1:
+                    time.sleep(delay)
+            except ClientError as exc:
+                if self._is_rate_limit_error(exc):
+                    last_exception = exc
+                    delay = base_delay * (2**attempt)
+                    self.logger.warning(
+                        "Gemini client error during JSON generation (attempt %s/%s): %s. Retrying in %s seconds...",
+                        attempt + 1,
+                        max_retries,
+                        exc,
+                        delay,
+                    )
+                    if attempt < max_retries - 1:
+                        time.sleep(delay)
+                else:
+                    raise
+            except Exception as exc:
+                if isinstance(exc, Retry):
+                    raise exc
+                logger.error(
+                    "Unexpected error during Gemini JSON generation: %s",
+                    exc,
+                    exc_info=True,
+                )
                 raise
-            logger.error("Error processing Gemini JSON response: %s", exc)
-            raise
-        return parsed, tokens
+
+        self.logger.error(
+            "Failed to generate/parse JSON after %s attempts.",
+            max_retries,
+        )
+
+        if isinstance(last_exception, ClientError) and last_exception is not None:
+            self._handle_rate_limit(last_exception, operation="JSON generation")
+            return {}, None
+
+        if isinstance(last_exception, google_exceptions.ResourceExhausted):
+            self._handle_rate_limit(last_exception, operation="JSON generation")
+            return {}, None
+
+        if last_exception is not None:
+            raise ValueError(f"Failed after {max_retries} attempts") from last_exception
+
+        raise ValueError(f"Failed after {max_retries} attempts")
 
     def _is_rate_limit_error(self, exc: Exception) -> bool:
-        if isinstance(exc, ResourceExhausted):
+        if isinstance(exc, google_exceptions.ResourceExhausted):
             return True
 
         if isinstance(exc, ClientError):
@@ -390,7 +513,9 @@ class GeminiAdapter(BaseAIAdapter):
 
         return None
 
-    def _parse_retry_delay(self, exc: ResourceExhausted | ClientError) -> int:
+    def _parse_retry_delay(
+        self, exc: google_exceptions.ResourceExhausted | ClientError
+    ) -> int:
         """Best-effort extraction of retry delay seconds from Gemini errors."""
 
         default_delay = max(int(self._rate_limit_sleep or 1.0), 5)
@@ -452,7 +577,7 @@ class GeminiAdapter(BaseAIAdapter):
             return 0
 
     def _handle_rate_limit(
-        self, exc: ResourceExhausted | ClientError, operation: str
+        self, exc: google_exceptions.ResourceExhausted | ClientError, operation: str
     ) -> None:
         """Centralised handling for Gemini rate limit responses."""
 
