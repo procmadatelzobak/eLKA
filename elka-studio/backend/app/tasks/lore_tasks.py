@@ -645,7 +645,6 @@ def generate_story_from_seed_task(
     story_author: str | None = None,
     *,
     task_type_hint: str | None = None,
-    remaining_story_contents: list[str] | None = None,
     parent_task_id: int | None = None,
     token: str | None = None,
     uce_apply: bool | None = None,
@@ -661,8 +660,6 @@ def generate_story_from_seed_task(
     request_kwargs = dict(getattr(self.request, "kwargs", {}) or {})
     if task_type_hint is None:
         task_type_hint = request_kwargs.get("task_type_hint")
-    if remaining_story_contents is None:
-        remaining_story_contents = request_kwargs.get("remaining_story_contents")
     if parent_task_id is None:
         parent_task_id = request_kwargs.get("parent_task_id")
     if token is None:
@@ -672,18 +669,8 @@ def generate_story_from_seed_task(
 
     rewrite_mode = (task_type_hint or "").lower() == "rewrite_import"
     apply_flag = bool(uce_apply) if uce_apply is not None else False
-    remaining_list: list[str] = []
-    if isinstance(remaining_story_contents, (list, tuple, set)):
-        remaining_list = list(remaining_story_contents)
 
     effective_parent_id = parent_task_id if parent_task_id is not None else task_db_id
-
-    rewrite_prompt = (
-        "Please rewrite the following story text faithfully. Maintain the "
-        "original language, style, and all narrative details. Omit any "
-        "non-narrative headers or metadata present at the beginning. Just "
-        "output the clean story text:"
-    )
 
     story_content_result: str | None = None
     story_relative_path: Path | None = None
@@ -863,38 +850,10 @@ Ensure the generated story is deeply consistent with **all** aspects of the esta
                 "token": token,
             },
         )
-
-        if remaining_list:
-            next_story_content = remaining_list[0]
-            new_remaining = remaining_list[1:]
-
-            if next_story_content:
-                logger.info(
-                    "Task %s: Chaining next story regeneration for import.",
-                    celery_task_id,
-                )
-                generate_story_from_seed_task.apply_async(
-                    args=[task_db_id],
-                    kwargs={
-                        "project_id": project_id,
-                        "seed": f"{rewrite_prompt}\n\n---\n\n{next_story_content}",
-                        "task_type_hint": "rewrite_import",
-                        "remaining_story_contents": new_remaining,
-                        "parent_task_id": effective_parent_id,
-                        "token": token,
-                        "uce_apply": apply_flag,
-                    },
-                )
-            else:
-                logger.error(
-                    "Task %s: Cannot chain next regeneration task. Missing content.",
-                    celery_task_id,
-                )
-        else:
-            logger.info(
-                "Task %s: Finished regeneration chain for import.",
-                celery_task_id,
-            )
+        logger.info(
+            "Task %s: Finished dispatching rewritten import story to UCE.",
+            celery_task_id,
+        )
 
     return result_payload
 @celery_app.task(
