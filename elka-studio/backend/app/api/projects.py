@@ -18,7 +18,7 @@ from sqlalchemy.orm import Session
 
 from ..db.session import get_session
 from ..models.project import Project
-from ..models.task import Task
+from ..models.task import Task, TaskStatus
 from ..services.git_manager import GitManager
 from ..tasks import uce_process_story_task
 from ..utils.config import load_config
@@ -436,14 +436,36 @@ async def import_stories(
         first_file_path,
     )
 
+    task_record: Task | None = None
+    async_result = None
     try:
-        uce_process_story_task.delay(
-            project_id=project_id,
-            token=token,
-            file_path=first_file_path,
-            remaining_story_filenames=remaining_files,
-            parent_task_id=parent_task_id,
-        )
+        with session.begin():
+            task_record = Task(
+                project_id=project_id,
+                type="uce_process_story",
+                status=TaskStatus.PENDING,
+                params={
+                    "file_path": first_file_path,
+                    "remaining_story_filenames": remaining_files,
+                },
+                parent_task_id=parent_task_id,
+            )
+            session.add(task_record)
+            session.flush()
+
+            async_result = uce_process_story_task.apply_async(
+                args=[task_record.id],
+                kwargs={
+                    "project_id": project_id,
+                    "token": token,
+                    "file_path": first_file_path,
+                    "remaining_story_filenames": remaining_files,
+                    "parent_task_id": parent_task_id,
+                },
+            )
+
+            task_record.celery_task_id = async_result.id
+            session.add(task_record)
     except Exception as exc:  # pragma: no cover - task scheduling dependent
         logger.exception(
             "Failed to schedule UCE processing for imported stories in project %s: %s",
@@ -460,6 +482,8 @@ async def import_stories(
             f"{len(saved_file_paths)} files uploaded and processing started."
         ),
         "import_directory": str(import_batch_dir.relative_to(project_path)),
+        "task_id": task_record.id if task_record else None,
+        "celery_task_id": async_result.id if async_result else None,
     }
 
 
