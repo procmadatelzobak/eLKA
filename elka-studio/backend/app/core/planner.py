@@ -667,9 +667,12 @@ def _format_event_line(event: FactEvent) -> str:
 
 
 def _extract_date_from_line(line: str) -> str | None:
+    """Return a trimmed date portion from a timeline entry, if present."""
     match = _TIMELINE_DATE_PATTERN.match(line)
     if match:
-        return match.group("date").strip()
+        date_text = match.group("date")
+        if date_text:
+            return date_text.strip()
     return None
 
 
