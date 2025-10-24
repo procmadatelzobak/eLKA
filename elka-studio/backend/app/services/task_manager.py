@@ -11,7 +11,6 @@ from celery import chain
 from celery.result import AsyncResult
 from sqlalchemy.orm import Session
 
-from git.exc import GitCommandError
 
 from app.db.redis_client import get_redis_client
 from app.db.session import SessionLocal
@@ -387,72 +386,33 @@ class TaskManager:
         self._broadcast_update(project_id)
 
     def _finalise_task(self, task: Task) -> Task:
-        """Perform repository operations required after task approval."""
+        """Merge the task branch into the default branch after approval."""
 
         result_payload: dict[str, Any] = {}
         if isinstance(task.result, dict):
             result_payload = deepcopy(task.result)
 
-        files_to_apply = result_payload.get("files")
-        if not isinstance(files_to_apply, dict) or not files_to_apply:
-            return task
+        source_branch = result_payload.get("branch")
+        if not isinstance(source_branch, str) or not source_branch.strip():
+            raise RuntimeError(
+                f"Task {task.id} result does not contain branch information for finalisation"
+            )
+        source_branch = source_branch.strip()
 
         project = self._load_project(task.project_id)
         git_adapter = app_context.create_git_adapter(project)
         target_branch = app_context.config.default_branch
 
-        repository = git_adapter.repo
         try:
-            repository.git.checkout(target_branch)
-        except GitCommandError:
-            try:
-                repository.git.checkout("-B", target_branch, f"origin/{target_branch}")
-            except GitCommandError:
-                repository.git.checkout(target_branch)
-
-        try:
-            origin = repository.remote(name="origin")
-            try:
-                origin.fetch()
-            except GitCommandError:
-                pass
-            try:
-                origin.pull(target_branch)
-            except GitCommandError:
-                pass
-        except ValueError:
-            origin = None
-
-        written_paths = git_adapter.write_files(files_to_apply)
-        relative_written_paths = {
-            str(path.relative_to(git_adapter.project_path)) for path in written_paths
-        }
-
-        additional_paths = [
-            str(path)
-            for path in (result_payload.get("changed_paths") or [])
-            if isinstance(path, str)
-        ]
-        relative_written_paths.update(additional_paths)
-
-        try:
-            commit_message = str(
-                result_payload.get("commit_message") or f"Apply task {task.id} changes"
+            commit_sha = git_adapter.merge_branch(
+                source_branch,
+                target_branch,
+                delete_source=True,
             )
-            if relative_written_paths:
-                repository.index.add(sorted(relative_written_paths))
-            else:
-                repository.git.add(A=True)
-            commit_sha = repository.index.commit(commit_message).hexsha
-        except GitCommandError as exc:
+        except RuntimeError as exc:
             raise RuntimeError(
-                f"Failed to commit task {task.id} changes: {exc}"
+                f"Failed to merge task branch '{source_branch}' into '{target_branch}': {exc}"
             ) from exc
-
-        try:
-            git_adapter.push_branch(target_branch)
-        except Exception as exc:
-            raise RuntimeError(f"Failed to push task {task.id} changes: {exc}") from exc
 
         session = self._session_factory()
         try:
@@ -469,9 +429,9 @@ class TaskManager:
                     "merged_into": target_branch,
                     "commit_sha": commit_sha,
                     "approval_required": False,
-                    "applied_paths": sorted(relative_written_paths),
                 }
             )
+            result_data.pop("applied_paths", None)
             stored_task.result = result_data
             session.add(stored_task)
             session.commit()
