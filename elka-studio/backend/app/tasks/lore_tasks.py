@@ -490,6 +490,28 @@ def uce_process_story_task(
             for issue in issues
             if issue.level == "error" and issue.code in blocking_codes
         ]
+        non_blocking_errors = [
+            issue
+            for issue in issues
+            if issue.level == "error" and issue.code not in blocking_codes
+        ]
+
+        for issue in non_blocking_errors:
+            logger.warning(
+                "UCE non-blocking inconsistency detected: %s - %s",
+                issue.code,
+                issue.message,
+            )
+            manager.update_task_status(
+                celery_task_id,
+                TaskStatus.RUNNING,
+                progress=38,
+                log_message=(
+                    "UCE WARNING (non-blocking error) "
+                    f"{issue.code}: {issue.message}"
+                ),
+            )
+
         if blocking_issues:
             error_messages = "; ".join(
                 f"{issue.code}: {issue.message}" for issue in blocking_issues
