@@ -484,12 +484,24 @@ def uce_process_story_task(
                 log_message=f"UCE {issue.level.upper()} {issue.code}: {issue.message}",
             )
 
-        if any(issue.level == "error" for issue in issues):
+        blocking_codes = {"entity_type_conflict"}
+        blocking_issues = [
+            issue
+            for issue in issues
+            if issue.level == "error" and issue.code in blocking_codes
+        ]
+        if blocking_issues:
+            error_messages = "; ".join(
+                f"{issue.code}: {issue.message}" for issue in blocking_issues
+            )
             manager.update_task_status(
                 celery_task_id,
                 TaskStatus.FAILURE,
                 progress=40,
-                log_message="UCE detected blocking inconsistencies; aborting run.",
+                log_message=(
+                    "UCE detected blocking inconsistencies: "
+                    f"{error_messages}; aborting run."
+                ),
             )
             return
 
