@@ -178,18 +178,44 @@ class GitManager:
             raise RuntimeError("No 'origin' remote configured for repository") from exc
 
         branch = self._config.default_branch
-        env = self._build_command_env(token)
+        env = self._build_git_env(token)
+
+        command = ["git", "-C", str(project_path), "fetch", "--prune", "origin"]
+
+        if token:
+            helper_path = Path(__file__).parent / "git_credential_helper.sh"
+            quoted_helper = shlex.quote(str(helper_path.resolve()))
+            command = [
+                "git",
+                "-c",
+                f"credential.helper=!sh {quoted_helper}",
+                "-C",
+                str(project_path),
+                "fetch",
+                "--prune",
+                "origin",
+            ]
 
         try:
-            with repo.git.custom_environment(**env):
-                repo.git.fetch("--prune", "origin")
-                try:
-                    repo.git.reset("--hard", f"origin/{branch}")
-                except GitCommandError:
-                    fallback_branch = self._determine_branch(repo)
-                    if fallback_branch == branch:
-                        raise
-                    repo.git.reset("--hard", f"origin/{fallback_branch}")
+            subprocess.run(
+                command,
+                check=True,
+                capture_output=True,
+                text=True,
+                env=env,
+            )
+        except subprocess.CalledProcessError as exc:
+            message = exc.stderr or exc.stdout or str(exc)
+            raise RuntimeError(f"Failed to fetch repository: {message}") from exc
+
+        try:
+            try:
+                repo.git.reset("--hard", f"origin/{branch}")
+            except GitCommandError:
+                fallback_branch = self._determine_branch(repo)
+                if fallback_branch == branch:
+                    raise
+                repo.git.reset("--hard", f"origin/{fallback_branch}")
         except GitCommandError as exc:
             raise RuntimeError(f"Failed to synchronise repository: {exc}") from exc
 
