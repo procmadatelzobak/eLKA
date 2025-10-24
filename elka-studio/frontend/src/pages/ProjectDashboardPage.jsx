@@ -6,6 +6,7 @@ import {
   createTask,
   deleteTask,
   fetchProject,
+  approveTask,
   importStories,
   pauseTask,
   resetProject,
@@ -18,6 +19,7 @@ import './ProjectDashboardPage.css';
 const taskActionMessages = {
   pause: 'Task paused successfully.',
   resume: 'Task resumed successfully.',
+  approve: 'Task approved successfully.',
 };
 
 const ProjectDashboardPage = () => {
@@ -202,6 +204,32 @@ const ProjectDashboardPage = () => {
       setTaskActionError(detail);
     } finally {
       setPendingState(taskId, action, false);
+    }
+  };
+
+  const handleApproveTask = async (taskId) => {
+    setTaskActionError(null);
+    setTaskActionMessage(null);
+    setPendingState(taskId, 'approve', true);
+
+    try {
+      const approvedTask = await approveTask(taskId);
+      if (approvedTask && typeof approvedTask === 'object') {
+        setTasks((previous) =>
+          Array.isArray(previous)
+            ? previous.map((task) => (task.id === taskId ? { ...task, ...approvedTask } : task))
+            : previous,
+        );
+      }
+
+      if (taskActionMessages.approve) {
+        setTaskActionMessage(taskActionMessages.approve);
+      }
+    } catch (error) {
+      const detail = error.response?.data?.detail || 'Failed to approve the task.';
+      setTaskActionError(detail);
+    } finally {
+      setPendingState(taskId, 'approve', false);
     }
   };
 
@@ -746,6 +774,7 @@ const ProjectDashboardPage = () => {
                   toggleTaskExpansion={toggleTaskExpansion}
                   getProgressValue={getProgressValue}
                   handleTaskAction={handleTaskAction}
+                  handleApproveTask={handleApproveTask}
                   handleDeleteTask={handleDeleteTask}
                   isPendingAction={isPendingAction}
                   openStoryModal={openStoryModal}

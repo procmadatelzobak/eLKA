@@ -10,6 +10,7 @@ const TaskItem = ({
   toggleTaskExpansion,
   getProgressValue,
   handleTaskAction,
+  handleApproveTask,
   handleDeleteTask,
   isPendingAction,
   openStoryModal,
@@ -25,6 +26,9 @@ const TaskItem = ({
   const outputTokensDisplay = formatTokens(task?.output_tokens ?? task?.total_output_tokens);
   const normalizedStatus = typeof task?.status === 'string' ? task.status.toLowerCase() : 'unknown';
   const showTokenSummary = task?.input_tokens != null || task?.output_tokens != null;
+  const isSuccessful = typeof task?.status === 'string' && task.status.toUpperCase() === 'SUCCESS';
+  const requiresApproval = Boolean(task?.result?.approval_required) && !task?.result_approved;
+  const canApprove = isSuccessful && requiresApproval;
 
   const childTasks = (allTasks || []).filter((current) => current.parent_task_id === task.id);
 
@@ -69,6 +73,16 @@ const TaskItem = ({
             >
               {isPendingAction(task.id, 'resume') ? 'Resuming…' : 'Resume'}
             </button>
+            {canApprove && (
+              <button
+                type="button"
+                className="task-card__action task-card__action--approve"
+                onClick={() => handleApproveTask(task.id)}
+                disabled={isPendingAction(task.id, 'approve')}
+              >
+                {isPendingAction(task.id, 'approve') ? 'Approving…' : 'Approve'}
+              </button>
+            )}
             <button
               type="button"
               className="task-card__action task-card__action--ghost"
@@ -161,6 +175,7 @@ const TaskItem = ({
               toggleTaskExpansion={toggleTaskExpansion}
               getProgressValue={getProgressValue}
               handleTaskAction={handleTaskAction}
+              handleApproveTask={handleApproveTask}
               handleDeleteTask={handleDeleteTask}
               isPendingAction={isPendingAction}
               openStoryModal={openStoryModal}
@@ -179,6 +194,7 @@ TaskItem.propTypes = {
     type: PropTypes.string,
     status: PropTypes.string,
     result: PropTypes.object,
+    result_approved: PropTypes.bool,
     input_tokens: PropTypes.number,
     output_tokens: PropTypes.number,
     total_input_tokens: PropTypes.number,
@@ -194,6 +210,7 @@ TaskItem.propTypes = {
   toggleTaskExpansion: PropTypes.func.isRequired,
   getProgressValue: PropTypes.func.isRequired,
   handleTaskAction: PropTypes.func.isRequired,
+  handleApproveTask: PropTypes.func.isRequired,
   handleDeleteTask: PropTypes.func.isRequired,
   isPendingAction: PropTypes.func.isRequired,
   openStoryModal: PropTypes.func.isRequired,
