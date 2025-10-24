@@ -38,7 +38,7 @@ src/
 
 ## API client
 
-`src/services/api.js` defines the Axios instance that targets `http://localhost:8000/api` by default. Override the base URL via a `.env` file with the `VITE_API_BASE_URL` variable.
+`src/services/api.js` defines the Axios instance that targets `http://localhost:8000/api` by default. Override the base URL via a `.env` file with the `VITE_API_BASE_URL` variable. Helper functions such as `createTask`, `pauseTask`, `resumeTask`, and `approveTask` wrap the task lifecycle endpoints exposed by the backend.
 
 ## Project dashboard
 
@@ -47,7 +47,7 @@ src/
 - The control panel validates and submits requests with the `createTask` helper from `src/services/api.js`.
 - The queue consumes updates via `TaskSocket` (`src/services/websocket.js`) to render progress and logs.
 - Completed tasks expose modals to preview the generated story and archived files.
-- Pause and resume actions are delegated to the `pauseTask` and `resumeTask` API helpers.
+- Pause and resume actions are delegated to the `pauseTask` and `resumeTask` API helpers, while completed tasks that require manual confirmation expose an **Approve** button powered by the `approveTask` helper.
 
 ### WebSocket configuration
 
