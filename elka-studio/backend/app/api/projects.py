@@ -439,39 +439,40 @@ async def import_stories(
     task_record: Task | None = None
     async_result = None
     try:
-        with session.begin():
-            task_record = Task(
-                project_id=project_id,
-                type="uce_process_story",
-                status=TaskStatus.PENDING,
-                params={
-                    "file_path": first_file_path,
-                    "remaining_story_filenames": remaining_files,
-                },
-                parent_task_id=parent_task_id,
-            )
-            session.add(task_record)
-            session.flush()
+        task_record = Task(
+            project_id=project_id,
+            type="uce_process_story",
+            status=TaskStatus.PENDING,
+            params={
+                "file_path": first_file_path,
+                "remaining_story_filenames": remaining_files,
+            },
+            parent_task_id=parent_task_id,
+        )
+        session.add(task_record)
+        session.flush()
 
-            async_result = uce_process_story_task.apply_async(
-                args=[task_record.id],
-                kwargs={
-                    "project_id": project_id,
-                    "token": token,
-                    "file_path": first_file_path,
-                    "remaining_story_filenames": remaining_files,
-                    "parent_task_id": parent_task_id,
-                },
-            )
+        async_result = uce_process_story_task.apply_async(
+            args=[task_record.id],
+            kwargs={
+                "project_id": project_id,
+                "token": token,
+                "file_path": first_file_path,
+                "remaining_story_filenames": remaining_files,
+                "parent_task_id": parent_task_id,
+            },
+        )
 
-            task_record.celery_task_id = async_result.id
-            session.add(task_record)
+        task_record.celery_task_id = async_result.id
+        session.add(task_record)
+        session.commit()
     except Exception as exc:  # pragma: no cover - task scheduling dependent
         logger.exception(
             "Failed to schedule UCE processing for imported stories in project %s: %s",
             project_id,
             exc,
         )
+        session.rollback()
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Files were saved but processing could not be scheduled.",
