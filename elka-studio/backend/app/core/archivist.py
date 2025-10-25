@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import re
+import unicodedata
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
@@ -54,17 +55,46 @@ _ENTITY_DIRECTORY_MAP: dict[str, tuple[str, str]] = {
     "character": ("Characters", "Character"),
     "characters": ("Characters", "Character"),
     "person": ("Characters", "Character"),
+    "people": ("Characters", "Character"),
+    "hero": ("Characters", "Character"),
+    "hrdina": ("Characters", "Character"),
+    "charakter": ("Characters", "Character"),
+    "postava": ("Characters", "Character"),
+    "postavy": ("Characters", "Character"),
     "location": ("Locations", "Location"),
     "locations": ("Locations", "Location"),
     "place": ("Locations", "Location"),
+    "city": ("Locations", "Location"),
+    "lokace": ("Locations", "Location"),
+    "lokalita": ("Locations", "Location"),
+    "misto": ("Locations", "Location"),
+    "místa": ("Locations", "Location"),
+    "místo": ("Locations", "Location"),
+    "mesta": ("Locations", "Location"),
+    "město": ("Locations", "Location"),
     "event": ("Events", "Event"),
     "events": ("Events", "Event"),
+    "battle": ("Events", "Event"),
+    "udalost": ("Events", "Event"),
+    "udalosti": ("Events", "Event"),
+    "událost": ("Events", "Event"),
+    "události": ("Events", "Event"),
     "concept": ("Concepts", "Concept"),
     "concepts": ("Concepts", "Concept"),
     "idea": ("Concepts", "Concept"),
+    "koncept": ("Concepts", "Concept"),
+    "koncepce": ("Concepts", "Concept"),
+    "myslenka": ("Concepts", "Concept"),
+    "myšlenka": ("Concepts", "Concept"),
     "item": ("Items", "Item"),
     "items": ("Items", "Item"),
+    "object": ("Items", "Item"),
     "artifact": ("Items", "Item"),
+    "artefakt": ("Items", "Item"),
+    "predmet": ("Items", "Item"),
+    "predmety": ("Items", "Item"),
+    "předmět": ("Items", "Item"),
+    "předměty": ("Items", "Item"),
     "thing": ("Items", "Item"),
     "material": ("Misc", "Material"),
     "materials": ("Misc", "Material"),
@@ -72,8 +102,12 @@ _ENTITY_DIRECTORY_MAP: dict[str, tuple[str, str]] = {
     "organizations": ("Misc", "Organization"),
     "organisation": ("Misc", "Organization"),
     "organisations": ("Misc", "Organization"),
+    "spolecnost": ("Misc", "Organization"),
+    "společnost": ("Misc", "Organization"),
     "misc": ("Misc", "Misc"),
     "other": ("Misc", "Misc"),
+    "ostatni": ("Misc", "Misc"),
+    "ostatní": ("Misc", "Misc"),
 }
 
 
@@ -445,7 +479,10 @@ class ArchivistEngine:
 
         fact_entity, subfolder = prepared
 
-        entity_type_key = (fact_entity.type or "").strip().lower()
+        raw_type_value = (fact_entity.type or "").strip()
+        entity_type_key = unicodedata.normalize("NFKD", raw_type_value).encode(
+            "ascii", "ignore"
+        ).decode("ascii").lower()
         if not subfolder or entity_type_key not in _ENTITY_DIRECTORY_MAP:
             logger.warning(
                 "Unknown entity type '%s' for entity %s; using Misc directory.",
@@ -453,6 +490,7 @@ class ArchivistEngine:
                 fact_entity.id,
             )
             subfolder = "Misc"
+            fact_entity = fact_entity.model_copy(update={"type": "Misc"})
         filename = f"{fact_entity.id}.md"
         entity_directory = Path("Entities") / subfolder
         absolute_directory_path = self.project_path / entity_directory
@@ -500,10 +538,20 @@ class ArchivistEngine:
         if not raw_type_value:
             raw_type_value = fallback_type.value
 
-        directory, canonical_type = _ENTITY_DIRECTORY_MAP.get(
-            raw_type_value.lower(),
-            ("Misc", "Misc"),
-        )
+        lookup_key = raw_type_value.lower()
+        directory_info = _ENTITY_DIRECTORY_MAP.get(lookup_key)
+        if not directory_info and lookup_key:
+            ascii_key = (
+                unicodedata.normalize("NFKD", raw_type_value)
+                .encode("ascii", "ignore")
+                .decode("ascii")
+                .lower()
+            )
+            directory_info = _ENTITY_DIRECTORY_MAP.get(ascii_key)
+        if not directory_info:
+            directory_info = ("Misc", "Misc")
+
+        directory, canonical_type = directory_info
 
         name = (
             getattr(entity, "name", None)

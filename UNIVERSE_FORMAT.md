@@ -19,6 +19,9 @@ A compliant eLKA universe repository MUST adhere to the following top-level stru
     * `/Entities/Concepts/`: Files describing abstract concepts, world rules, magic systems, etc.
     * `/Entities/Items/`: Files describing specific items.
     * `/Entities/Misc/`: For entities that don't fit elsewhere (use sparingly).
+        * Entity extraction normalises all detected types (including non-English outputs) to these
+          English directory names before archival. Legacy directories such as `Objekty/` are read
+          for backwards compatibility only and MUST NOT be used for new content.
 * `/Stories/`: Contains narrative texts (stories, chapters). May contain subdirectories for organization (e.g., `/Stories/Saga_Name/`).
 * `/Canon/`: Contains foundational lore, history, and rules defining the universe framework.
     * `CoreTruths.md`: Key file with immutable facts used for validation.
