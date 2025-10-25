@@ -18,6 +18,8 @@ const UniverseBrowserPage = () => {
   const [contentError, setContentError] = useState(null);
   const [isPlaying, setIsPlaying] = useState(false);
   const [isPaused, setIsPaused] = useState(false);
+  // NEW: track filter input for tree search
+  const [filterTerm, setFilterTerm] = useState('');
   const utteranceRef = useRef(null);
   const speechSynthesis =
     typeof window !== 'undefined' && 'speechSynthesis' in window ? window.speechSynthesis : null;
@@ -229,6 +231,32 @@ const UniverseBrowserPage = () => {
     [expandedPaths, handleFileSelect, selectedFilePath, toggleFolder],
   );
 
+  // NEW: memoized filtered tree based on search input
+  const filteredTree = useMemo(() => {
+    if (!Array.isArray(tree) || !filterTerm.trim()) {
+      return tree;
+    }
+    const term = filterTerm.trim().toLowerCase();
+    const filterNodes = (nodes, currentPath = '') => {
+      const result = [];
+      nodes.forEach((node) => {
+        const basePath = currentPath ? `${currentPath}/${node.name}` : node.name;
+        if (node.type === 'folder') {
+          const children = filterNodes(node.children || [], basePath);
+          if (children.length > 0 || node.name.toLowerCase().includes(term)) {
+            result.push({ ...node, children });
+          }
+        } else if (node.type === 'file' && typeof node.name === 'string') {
+          if (node.name.toLowerCase().includes(term)) {
+            result.push(node);
+          }
+        }
+      });
+      return result;
+    };
+    return filterNodes(tree);
+  }, [tree, filterTerm]);
+
   return (
     <div className="browser" aria-live="polite">
       <section className="browser__panel browser__panel--tree">
@@ -251,9 +279,19 @@ const UniverseBrowserPage = () => {
           ) : tree.length === 0 ? (
             <p className="browser__status">No files found in this project.</p>
           ) : (
-            <nav className="file-tree" aria-label="Project file tree">
-              {renderTree(tree)}
-            </nav>
+            <>
+              {/* Search input for filtering files and folders */}
+              <input
+                type="text"
+                className="file-tree__filter"
+                placeholder="Filter files…"
+                value={filterTerm}
+                onChange={(e) => setFilterTerm(e.target.value)}
+              />
+              <nav className="file-tree" aria-label="Project file tree">
+                {renderTree(filteredTree)}
+              </nav>
+            </>
           )}
         </div>
       </section>
@@ -272,11 +310,11 @@ const UniverseBrowserPage = () => {
                 <div className="tts-controls">
                   {!isPlaying ? (
                     <button type="button" onClick={handlePlay}>
-                      Přehrát
+                      ▶️ Přehrát
                     </button>
                   ) : (
                     <button type="button" onClick={handlePause}>
-                      Pauza
+                      ⏸️ Pauza
                     </button>
                   )}
                   <button
@@ -284,7 +322,7 @@ const UniverseBrowserPage = () => {
                     onClick={handleStop}
                     disabled={!isPlaying && !isPaused}
                   >
-                    Stop
+                    ⏹️ Stop
                   </button>
                 </div>
               ) : null}
