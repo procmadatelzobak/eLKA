@@ -73,21 +73,52 @@ _ENTITY_KEY_TO_TYPE: Dict[str, str] = {
 
 _TYPE_SYNONYMS: Dict[str, str] = {
     "character": "Character",
+    "characters": "Character",
+    "charakter": "Character",
     "person": "Character",
     "people": "Character",
     "hero": "Character",
+    "hrdina": "Character",
+    "postava": "Character",
+    "postavy": "Character",
     "location": "Location",
+    "locations": "Location",
     "place": "Location",
     "city": "Location",
+    "lokace": "Location",
+    "lokalita": "Location",
+    "misto": "Location",
+    "místa": "Location",
+    "místo": "Location",
+    "mesta": "Location",
+    "město": "Location",
     "event": "Event",
+    "events": "Event",
     "battle": "Event",
+    "udalost": "Event",
+    "udalosti": "Event",
+    "událost": "Event",
+    "události": "Event",
     "concept": "Concept",
+    "concepts": "Concept",
     "idea": "Concept",
+    "koncept": "Concept",
+    "koncepce": "Concept",
+    "myslenka": "Concept",
+    "myšlenka": "Concept",
     "item": "Item",
+    "items": "Item",
     "object": "Item",
     "artifact": "Item",
+    "predmet": "Item",
+    "predmety": "Item",
+    "předmět": "Item",
+    "předměty": "Item",
+    "artefakt": "Item",
     "misc": "Misc",
     "other": "Misc",
+    "ostatni": "Misc",
+    "ostatní": "Misc",
 }
 
 _ALLOWED_TYPE_LOOKUP: Dict[str, str] = {
@@ -424,12 +455,27 @@ class ExtractorEngine:
         resolved_type = canonical_type
         resolved_label = canonical_type.lower()
         if isinstance(raw_type, str) and raw_type.strip():
-            candidate = _ALLOWED_TYPE_LOOKUP.get(raw_type.strip().lower())
-            if candidate:
-                resolved_type = candidate
-                resolved_label = raw_type.strip().lower()
-            else:
-                raise ValueError(f"Unsupported entity type '{raw_type}'")
+            raw_type_normalised = raw_type.strip().lower()
+            candidate = _ALLOWED_TYPE_LOOKUP.get(raw_type_normalised)
+            if not candidate:
+                ascii_normalised = (
+                    unicodedata.normalize("NFKD", raw_type.strip())
+                    .encode("ascii", "ignore")
+                    .decode("ascii")
+                    .lower()
+                )
+                candidate = _ALLOWED_TYPE_LOOKUP.get(ascii_normalised)
+            if not candidate:
+                logger.warning(
+                    "Extractor received unsupported entity type '%s'; falling back to Misc.",
+                    raw_type,
+                )
+                if canonical_type in _ENTITY_KEY_TO_TYPE.values():
+                    candidate = canonical_type
+                else:
+                    candidate = "Misc"
+            resolved_type = candidate
+            resolved_label = candidate.lower()
         aliases = _normalise_aliases(raw_entity.get("aliases"))
         description = raw_entity.get("description")
         if isinstance(description, str):
